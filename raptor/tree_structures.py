@@ -1,28 +1,28 @@
-from typing import Dict, List, Set
+from typing import TypedDict
+import numpy as np
 
 
-class Node:
+class Node(TypedDict):
     """
     Represents a node in the hierarchical tree structure.
     """
 
-    def __init__(self, text: str, index: int, children: Set[int], embeddings) -> None:
-        self.text = text
-        self.index = index
-        self.children = children
-        self.embeddings = embeddings
+    text: str
+    index: int
+    children: set[int]
+    embeddings: dict[str, np.ndarray]
 
 
-class Tree:
+Nodes = dict[int, Node]
+
+
+class Tree(TypedDict):
     """
     Represents the entire hierarchical tree structure.
     """
 
-    def __init__(
-        self, all_nodes, root_nodes, leaf_nodes, num_layers, layer_to_nodes
-    ) -> None:
-        self.all_nodes = all_nodes
-        self.root_nodes = root_nodes
-        self.leaf_nodes = leaf_nodes
-        self.num_layers = num_layers
-        self.layer_to_nodes = layer_to_nodes
+    all_nodes: Nodes
+    root_nodes: Nodes
+    leaf_nodes: Nodes
+    num_layers: int
+    layer_to_nodes: dict[int, list[Node]]

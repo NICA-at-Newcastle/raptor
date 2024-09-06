@@ -1,0 +1,55 @@
+
+[project]
+name = "raptor"
+version = "0.1.0"
+description = "Default template for PDM package"
+authors = [
+    {name = "Benjamin", email = "benrogersnewsome@gmail.com"},
+]
+dependencies = [
+    "numpy>=1.26.3",
+    "scikit-learn",
+    "tenacity>=9.0.0",
+    "umap-learn>=0.5.5",
+    "urllib3>=1.26.6",
+    "sentence-transformers>=2.2.2",
+    "torch",
+    "transformers>=4.44.2",
+    "openai>=1.43.1",
+    "faiss-cpu>=1.8.0.post1",
+    "accelerate>=0.34.2",
+]
+requires-python = "==3.12.*"
+readme = "README.md"
+license = {text = "MIT"}
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pdm]
+distribution = false
+
+[tool.pdm.scripts]
+_.env_file = ".env"
+test = "pytest"
+
+[tool.pdm.dev-dependencies]
+test = [
+    "pytest>=8.3.2",
+    "pytest-mock>=3.14.0",
+]
+dev = [
+    "-e file:///${PROJECT_ROOT}/#egg=raptor",
+]
+
+[tool.setuptools.package-dir]
+raptor = "raptor"
+
+[tool.pytest]
+log_cli = "True"
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]

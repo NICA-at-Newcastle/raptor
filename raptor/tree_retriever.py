@@ -1,161 +1,95 @@
+from __future__ import annotations
+import itertools
 import logging
-import os
-from typing import Dict, List, Set
-
-import tiktoken
-from tenacity import retry, stop_after_attempt, wait_random_exponential
-
-from .EmbeddingModels import BaseEmbeddingModel, OpenAIEmbeddingModel
-from .Retrievers import BaseRetriever
+from typing import List, Optional, Literal, TypedDict, overload, Union, Iterable
+import dataclasses
+import numpy as np
+from .embedding_models import BaseEmbeddingModel
+from .token_counter import BaseTokenCounter, BytePairTokenCounter
 from .tree_structures import Node, Tree
-from .utils import (distances_from_embeddings, get_children, get_embeddings,
-                    get_node_list, get_text,
-                    indices_of_nearest_neighbors_from_distances,
-                    reverse_mapping)
+from .utils import (
+    distances_from_embeddings,
+    get_embeddings,
+    get_node_list,
+    get_text,
+    indices_of_nearest_neighbors_from_distances,
+    reverse_mapping,
+)
+from .storages import BaseStorage
 
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
 
-class TreeRetrieverConfig:
-    def __init__(
-        self,
-        tokenizer=None,
-        threshold=None,
-        top_k=None,
-        selection_mode=None,
-        context_embedding_model=None,
-        embedding_model=None,
-        num_layers=None,
-        start_layer=None,
-    ):
-        if tokenizer is None:
-            tokenizer = tiktoken.get_encoding("cl100k_base")
-        self.tokenizer = tokenizer
+class TreeRetriever:
 
-        if threshold is None:
-            threshold = 0.5
-        if not isinstance(threshold, float) or not (0 <= threshold <= 1):
-            raise ValueError("threshold must be a float between 0 and 1")
-        self.threshold = threshold
+    class Limit:
+        class TopK(int):
+            """TopK(top_k)"""
 
-        if top_k is None:
-            top_k = 5
-        if not isinstance(top_k, int) or top_k < 1:
-            raise ValueError("top_k must be an integer and at least 1")
-        self.top_k = top_k
+        class Threshold(float):
+            """Threshold(threshold)"""
 
-        if selection_mode is None:
-            selection_mode = "top_k"
-        if not isinstance(selection_mode, str) or selection_mode not in [
-            "top_k",
-            "threshold",
-        ]:
-            raise ValueError(
-                "selection_mode must be a string and either 'top_k' or 'threshold'"
-            )
-        self.selection_mode = selection_mode
+    class SearchMethod:
+        class Flatten(tuple[int, int]):
+            """Flatten((top_k, max_tokens))"""
 
-        if context_embedding_model is None:
-            context_embedding_model = "OpenAI"
-        if not isinstance(context_embedding_model, str):
-            raise ValueError("context_embedding_model must be a string")
-        self.context_embedding_model = context_embedding_model
+        class Tree(int):
+            """Tree(start_layer)"""
 
-        if embedding_model is None:
-            embedding_model = OpenAIEmbeddingModel()
-        if not isinstance(embedding_model, BaseEmbeddingModel):
-            raise ValueError(
-                "embedding_model must be an instance of BaseEmbeddingModel"
-            )
-        self.embedding_model = embedding_model
+    @dataclasses.dataclass
+    class Config:
 
-        if num_layers is not None:
-            if not isinstance(num_layers, int) or num_layers < 0:
-                raise ValueError("num_layers must be an integer and at least 0")
-        self.num_layers = num_layers
-
-        if start_layer is not None:
-            if not isinstance(start_layer, int) or start_layer < 0:
-                raise ValueError("start_layer must be an integer and at least 0")
-        self.start_layer = start_layer
-
-    def log_config(self):
-        config_log = """
-        TreeRetrieverConfig:
-            Tokenizer: {tokenizer}
-            Threshold: {threshold}
-            Top K: {top_k}
-            Selection Mode: {selection_mode}
-            Context Embedding Model: {context_embedding_model}
-            Embedding Model: {embedding_model}
-            Num Layers: {num_layers}
-            Start Layer: {start_layer}
-        """.format(
-            tokenizer=self.tokenizer,
-            threshold=self.threshold,
-            top_k=self.top_k,
-            selection_mode=self.selection_mode,
-            context_embedding_model=self.context_embedding_model,
-            embedding_model=self.embedding_model,
-            num_layers=self.num_layers,
-            start_layer=self.start_layer,
+        storage: BaseStorage = dataclasses.field()
+        limit: Union[TreeRetriever.Limit.TopK, TreeRetriever.Limit.Threshold] = (
+            dataclasses.field()
         )
-        return config_log
-
-
-class TreeRetriever(BaseRetriever):
-
-    def __init__(self, config, tree) -> None:
-        if not isinstance(tree, Tree):
-            raise ValueError("tree must be an instance of Tree")
-
-        if config.num_layers is not None and config.num_layers > tree.num_layers + 1:
-            raise ValueError(
-                "num_layers in config must be less than or equal to tree.num_layers + 1"
-            )
-
-        if config.start_layer is not None and config.start_layer > tree.num_layers:
-            raise ValueError(
-                "start_layer in config must be less than or equal to tree.num_layers"
-            )
-
-        self.tree = tree
-        self.num_layers = (
-            config.num_layers if config.num_layers is not None else tree.num_layers + 1
+        embedding_model: BaseEmbeddingModel = dataclasses.field()
+        token_counter: BaseTokenCounter = dataclasses.field(
+            default=BytePairTokenCounter()
         )
-        self.start_layer = (
-            config.start_layer if config.start_layer is not None else tree.num_layers
-        )
+        max_iterations: int = dataclasses.field(default=100)
+        start_layer: Optional[int] = dataclasses.field(default=0)
 
-        if self.num_layers > self.start_layer + 1:
-            raise ValueError("num_layers must be less than or equal to start_layer + 1")
+        def __post_init__(self):
 
-        self.tokenizer = config.tokenizer
-        self.top_k = config.top_k
-        self.threshold = config.threshold
-        self.selection_mode = config.selection_mode
+            if self.start_layer is not None and self.start_layer < 0:
+                raise ValueError("start_layer must be >= 0")
+
+        def log_config(self):
+            return f"""
+            TreeRetriever.Config:
+                TokenCounter: {self.token_counter}
+                Embedding Model: {self.embedding_model}
+                Start Layer: {self.start_layer}
+                Limit: {self.limit}
+            """
+
+    def __init__(self, config: Config) -> None:
+
+        self.storage = config.storage
+        self.token_counter = config.token_counter
         self.embedding_model = config.embedding_model
-        self.context_embedding_model = config.context_embedding_model
-
-        self.tree_node_index_to_layer = reverse_mapping(self.tree.layer_to_nodes)
+        self.max_iterations = config.max_iterations
+        self.limit = config.limit
+        match self.limit:
+            case self.Limit.TopK(x):
+                if x < 1:
+                    raise ValueError("TopK limit must specify an int >= 1")
+            case self.Limit.Threshold(x):
+                if x < 0:
+                    raise ValueError("Threshold limit must specify a float > 0")
 
         logging.info(
             f"Successfully initialized TreeRetriever with Config {config.log_config()}"
         )
 
-    def create_embedding(self, text: str) -> List[float]:
-        """
-        Generates embeddings for the given text using the specified embedding model.
-
-        Args:
-            text (str): The text for which to generate embeddings.
-
-        Returns:
-            List[float]: The generated embeddings.
-        """
+    def _create_embedding(self, text: str) -> np.ndarray:
         return self.embedding_model.create_embedding(text)
 
-    def retrieve_information_collapse_tree(self, query: str, top_k: int, max_tokens: int) -> str:
+    def retrieve_information_collapse_tree(
+        self,
+        query: str,
+    ) -> Iterable[Node]:
         """
         Retrieves the most relevant information from the tree based on the query.
 
@@ -167,38 +101,96 @@ class TreeRetriever(BaseRetriever):
             str: The context created using the most relevant nodes.
         """
 
-        query_embedding = self.create_embedding(query)
+        query_embedding = self._create_embedding(query)
 
-        selected_nodes = []
+        return self._retreive_information_from_storage(
+            query_embedding,
+            None,
+            None,
+        )
 
-        node_list = get_node_list(self.tree.all_nodes)
+    @staticmethod
+    def _select_nodes_by_threshold(
+        nodes: Iterable[tuple[Node, float]],
+        threshold: float,
+    ) -> Iterable[Node]:
+        for node, distance in nodes:
+            if distance > threshold:
+                yield node
 
-        embeddings = get_embeddings(node_list, self.context_embedding_model)
+    @staticmethod
+    def _select_nodes_by_top_k(
+        nodes: Iterable[tuple[Node, float]],
+        top_k: int,
+    ) -> Iterable[Node]:
+        for (node, _), _ in zip(nodes, range(top_k)):
+            yield node
 
-        distances = distances_from_embeddings(query_embedding, embeddings)
+    def _retreive_information_from_storage(
+        self,
+        query: np.ndarray,
+        indices: Optional[set[int]],
+        layer: Optional[int],
+    ) -> Iterable[Node]:
 
-        indices = indices_of_nearest_neighbors_from_distances(distances)
+        match self.limit:
+            case self.Limit.TopK(x):
+                limit = x
+            case _:
+                limit = None
 
-        total_tokens = 0
-        for idx in indices[:top_k]:
+        found = self.storage.search(
+            query,
+            indices=indices,
+            layer=layer,
+            limit=limit,
+        )
 
-            node = node_list[idx]
-            node_tokens = len(self.tokenizer.encode(node.text))
+        match self.limit:
+            case self.Limit.TopK(x):
+                yield from self._select_nodes_by_top_k(found, x)
+            case self.Limit.Threshold(x):
+                yield from self._select_nodes_by_threshold(found, x)
 
-            if total_tokens + node_tokens > max_tokens:
-                break
+    def _retreive_information_from_child_nodes_recurse(
+        self,
+        query: np.ndarray,
+        parent_nodes: List[Node],
+        iteration_number: int,
+    ) -> Iterable[Node]:
 
-            selected_nodes.append(node)
-            total_tokens += node_tokens
+        child_node_indices: set[int] = set().union(
+            *(node["children"] for node in parent_nodes)
+        )
 
-        context = get_text(selected_nodes)
-        return selected_nodes, context
+        nodes_to_add = list(
+            self._retreive_information_from_storage(
+                query,
+                child_node_indices,
+                None,
+            )
+        )
 
-    def retrieve_information(
-        self, current_nodes: List[Node], query: str, num_layers: int
-    ) -> str:
+        if iteration_number >= self.max_iterations or len(child_node_indices) == 0:
+            return nodes_to_add
+
+        return itertools.chain(
+            nodes_to_add,
+            self._retreive_information_from_child_nodes_recurse(
+                query,
+                nodes_to_add,
+                iteration_number + 1,
+            ),
+        )
+
+    def _retrieve_information_tree_search(
+        self,
+        query: str,
+        start_layer: int,
+    ) -> tuple[list[Node], str]:
         """
         Retrieves the most relevant information from the tree based on the query.
+        Recursively iterates to query embeddings on child nodes.
 
         Args:
             current_nodes (List[Node]): A List of the current nodes.
@@ -209,56 +201,56 @@ class TreeRetriever(BaseRetriever):
             str: The context created using the most relevant nodes.
         """
 
-        query_embedding = self.create_embedding(query)
+        query_embedding = self._create_embedding(query)
 
-        selected_nodes = []
+        selected_nodes = list(
+            self._retreive_information_from_storage(
+                query_embedding,
+                None,
+                start_layer,
+            )
+        )
 
-        node_list = current_nodes
+        child_selected_nodes = self._retreive_information_from_child_nodes_recurse(
+            query_embedding,
+            selected_nodes,
+            0,
+        )
 
-        for layer in range(num_layers):
-
-            embeddings = get_embeddings(node_list, self.context_embedding_model)
-
-            distances = distances_from_embeddings(query_embedding, embeddings)
-
-            indices = indices_of_nearest_neighbors_from_distances(distances)
-
-            if self.selection_mode == "threshold":
-                best_indices = [
-                    index for index in indices if distances[index] > self.threshold
-                ]
-
-            elif self.selection_mode == "top_k":
-                best_indices = indices[: self.top_k]
-
-            nodes_to_add = [node_list[idx] for idx in best_indices]
-
-            selected_nodes.extend(nodes_to_add)
-
-            if layer != num_layers - 1:
-
-                child_nodes = []
-
-                for index in best_indices:
-                    child_nodes.extend(node_list[index].children)
-
-                # take the unique values
-                child_nodes = list(dict.fromkeys(child_nodes))
-                node_list = [self.tree.all_nodes[i] for i in child_nodes]
+        selected_nodes.extend(child_selected_nodes)
+        del child_selected_nodes
 
         context = get_text(selected_nodes)
         return selected_nodes, context
 
+    class LayerInformation(TypedDict):
+        node_index: int
+        layer_number: int
+
+    @overload
     def retrieve(
         self,
         query: str,
-        start_layer: int = None,
-        num_layers: int = None,
-        top_k: int = 10, 
-        max_tokens: int = 3500,
-        collapse_tree: bool = True,
-        return_layer_information: bool = False,
+        search_method: Union[SearchMethod.Flatten, SearchMethod.Tree],
+        return_layer_information: Literal[False] = False,
     ) -> str:
+        pass
+
+    @overload
+    def retrieve(
+        self,
+        query: str,
+        search_method: Union[SearchMethod.Flatten, SearchMethod.Tree],
+        return_layer_information: Literal[True] = True,
+    ) -> tuple[str, list[LayerInformation]]:
+        pass
+
+    def retrieve(
+        self,
+        query: str,
+        search_method: Union[SearchMethod.Flatten, SearchMethod.Tree],
+        return_layer_information: bool = False,
+    ) -> str | tuple[str, list[LayerInformation]]:
         """
         Queries the tree and returns the most relevant information.
 
@@ -273,52 +265,35 @@ class TreeRetriever(BaseRetriever):
             str: The result of the query.
         """
 
-        if not isinstance(query, str):
-            raise ValueError("query must be a string")
-
-        if not isinstance(max_tokens, int) or max_tokens < 1:
-            raise ValueError("max_tokens must be an integer and at least 1")
-
-        if not isinstance(collapse_tree, bool):
-            raise ValueError("collapse_tree must be a boolean")
-
-        # Set defaults
-        start_layer = self.start_layer if start_layer is None else start_layer
-        num_layers = self.num_layers if num_layers is None else num_layers
-
-        if not isinstance(start_layer, int) or not (
-            0 <= start_layer <= self.tree.num_layers
-        ):
-            raise ValueError(
-                "start_layer must be an integer between 0 and tree.num_layers"
-            )
-
-        if not isinstance(num_layers, int) or num_layers < 1:
-            raise ValueError("num_layers must be an integer and at least 1")
-
-        if num_layers > (start_layer + 1):
-            raise ValueError("num_layers must be less than or equal to start_layer + 1")
-
-        if collapse_tree:
-            logging.info(f"Using collapsed_tree")
-            selected_nodes, context = self.retrieve_information_collapse_tree(
-                query, top_k, max_tokens
-            )
-        else:
-            layer_nodes = self.tree.layer_to_nodes[start_layer]
-            selected_nodes, context = self.retrieve_information(
-                layer_nodes, query, num_layers
-            )
+        match search_method:
+            case self.SearchMethod.Tree(start_layer):
+                if start_layer < 0:
+                    raise ValueError("Start layer must be >= 0")
+                selected_nodes, context = self._retrieve_information_tree_search(
+                    query,
+                    start_layer,
+                )
+            case self.SearchMethod.Flatten((top_k, max_tokens)):
+                if top_k < 1:
+                    raise ValueError("top_k must be >= 0")
+                if max_tokens < 1:
+                    raise ValueError("max_tokens must be an integer and at least 1")
+                logging.info(f"Using collapsed_tree")
+                selected_nodes, context = self.retrieve_information_collapse_tree(
+                    query,
+                    top_k,
+                    max_tokens,
+                )
 
         if return_layer_information:
 
-            layer_information = []
+            layer_information: list[TreeRetriever.LayerInformation] = []
 
             for node in selected_nodes:
                 layer_information.append(
                     {
-                        "node_index": node.index,
-                        "layer_number": self.tree_node_index_to_layer[node.index],
+                        "node_index": node["index"],
+                        "layer_number": self.tree_node_index_to_layer[node["index"]],
                     }
                 )
 

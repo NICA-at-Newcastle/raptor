@@ -1,19 +1,20 @@
 import logging
 import random
-from abc import ABC, abstractmethod
+from abc import abstractmethod
+import dataclasses
 from typing import List, Optional
 
 import numpy as np
-import tiktoken
 import umap
 from sklearn.mixture import GaussianMixture
 
 # Initialize logging
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
+from .token_counter import BaseTokenCounter, BytePairTokenCounter
 from .tree_structures import Node
+
 # Import necessary methods from other modules
-from .utils import get_embeddings
 
 # Set a random seed for reproducibility
 RANDOM_SEED = 224
@@ -31,6 +32,7 @@ def global_cluster_embeddings(
     reduced_embeddings = umap.UMAP(
         n_neighbors=n_neighbors, n_components=dim, metric=metric
     ).fit_transform(embeddings)
+    assert isinstance(reduced_embeddings, np.ndarray)
     return reduced_embeddings
 
 
@@ -40,6 +42,7 @@ def local_cluster_embeddings(
     reduced_embeddings = umap.UMAP(
         n_neighbors=num_neighbors, n_components=dim, metric=metric
     ).fit_transform(embeddings)
+    assert isinstance(reduced_embeddings, np.ndarray)
     return reduced_embeddings
 
 
@@ -69,7 +72,9 @@ def GMM_cluster(embeddings: np.ndarray, threshold: float, random_state: int = 0)
 def perform_clustering(
     embeddings: np.ndarray, dim: int, threshold: float, verbose: bool = False
 ) -> List[np.ndarray]:
-    reduced_embeddings_global = global_cluster_embeddings(embeddings, min(dim, len(embeddings) -2))
+    reduced_embeddings_global = global_cluster_embeddings(
+        embeddings, min(dim, len(embeddings) - 2)
+    )
     global_clusters, n_global_clusters = GMM_cluster(
         reduced_embeddings_global, threshold
     )
@@ -123,28 +128,51 @@ def perform_clustering(
     return all_local_clusters
 
 
-class ClusteringAlgorithm(ABC):
+class ClusteringAlgorithm:
     @abstractmethod
-    def perform_clustering(self, embeddings: np.ndarray, **kwargs) -> List[List[int]]:
-        pass
+    def __call__(
+        self,
+        nodes: List[Node],
+        embedding_model_name: str,
+    ) -> list[list[Node]]:
+        raise NotImplemented("Implement in subclass")
+
+    @property
+    @abstractmethod
+    def reduction_dimension(self) -> int:
+        raise NotImplemented("Implement in subclass")
 
 
 class RAPTOR_Clustering(ClusteringAlgorithm):
-    def perform_clustering(
+
+    @dataclasses.dataclass
+    class Config:
+        max_length_in_cluster: int = dataclasses.field(default=3500)
+        token_counter: BaseTokenCounter = dataclasses.field(
+            default_factory=BytePairTokenCounter
+        )
+        reduction_dimension: int = dataclasses.field(default=10)
+        threshold: float = dataclasses.field(default=0.1)
+        verbose: bool = dataclasses.field(default=False)
+
+    def __init__(self, config: Config):
+        self.config = config
+
+    def __call__(
+        self,
         nodes: List[Node],
         embedding_model_name: str,
-        max_length_in_cluster: int = 3500,
-        tokenizer=tiktoken.get_encoding("cl100k_base"),
-        reduction_dimension: int = 10,
-        threshold: float = 0.1,
-        verbose: bool = False,
-    ) -> List[List[Node]]:
+    ) -> list[list[Node]]:
         # Get the embeddings from the nodes
-        embeddings = np.array([node.embeddings[embedding_model_name] for node in nodes])
+        embeddings = np.array(
+            [node["embeddings"][embedding_model_name] for node in nodes]
+        )
 
         # Perform the clustering
         clusters = perform_clustering(
-            embeddings, dim=reduction_dimension, threshold=threshold
+            embeddings,
+            dim=self.config.reduction_dimension,
+            threshold=self.config.threshold,
         )
 
         # Initialize an empty list to store the clusters of nodes
@@ -165,21 +193,26 @@ class RAPTOR_Clustering(ClusteringAlgorithm):
 
             # Calculate the total length of the text in the nodes
             total_length = sum(
-                [len(tokenizer.encode(node.text)) for node in cluster_nodes]
+                [self.config.token_counter(node["text"]) for node in cluster_nodes]
             )
 
             # If the total length exceeds the maximum allowed length, recluster this cluster
-            if total_length > max_length_in_cluster:
-                if verbose:
+            if total_length > self.config.max_length_in_cluster:
+                if self.config.verbose:
                     logging.info(
                         f"reclustering cluster with {len(cluster_nodes)} nodes"
                     )
                 node_clusters.extend(
-                    RAPTOR_Clustering.perform_clustering(
-                        cluster_nodes, embedding_model_name, max_length_in_cluster
+                    self(
+                        cluster_nodes,
+                        embedding_model_name,
                     )
                 )
             else:
                 node_clusters.append(cluster_nodes)
 
         return node_clusters
+
+    @property
+    def reduction_dimension(self) -> int:
+        return self.config.reduction_dimension
