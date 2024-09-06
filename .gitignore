@@ -31,3 +31,10 @@ finetuning_ckpts/
 assertion.log
 *.log
 *.db
+
+*.ignore.*
+
+
+# Python
+.venv
+.pdm-python
