@@ -38,3 +38,8 @@ assertion.log
 # Python
 .venv
 .pdm-python
+
+*.ignore
+*.ignore.*
+
+.cache
