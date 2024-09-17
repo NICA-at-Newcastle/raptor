@@ -205,19 +205,12 @@ class TreeBuilder(ABC):
 
         return leaf_nodes
 
-    def build_from_text(self, text: str, use_multithreading: bool = True) -> Tree:
-        """Builds a golden tree from the input text, optionally using multithreading.
-
-        Args:
-            text (str): The input text.
-            use_multithreading (bool, optional): Whether to use multithreading when creating leaf nodes.
-                Default: True.
-
-        Returns:
-            Tree: The golden tree structure.
-        """
-        chunks = split_text(text, self.config.token_counter, self.config.max_tokens)
-
+    def build_from_chunks(
+        self,
+        chunks: list[str],
+        use_multithreading: bool = True
+    ) -> Tree:
+        """Builds a tree using the pre-computed chunks."""
         logging.info("Creating Leaf Nodes")
 
         if use_multithreading:
@@ -246,6 +239,21 @@ class TreeBuilder(ABC):
             "layer_to_nodes": layer_to_nodes,
         }
 
+    def build_from_text(self, text: str, use_multithreading: bool = True) -> Tree:
+        """Builds a golden tree from the input text, optionally using multithreading.
+
+        Args:
+            text (str): The input text.
+            use_multithreading (bool, optional): Whether to use multithreading when creating leaf nodes.
+                Default: True.
+
+        Returns:
+            Tree: The golden tree structure.
+        """
+        chunks = split_text(text, self.config.token_counter, self.config.max_tokens)
+        return self.build_from_chunks(chunks, use_multithreading)
+        
+
     @abstractmethod
     def construct_tree(
         self,
@@ -267,55 +275,3 @@ class TreeBuilder(ABC):
             Dict[int, Node]: The final set of root nodes.
         """
         raise NotImplementedError("Implement in subclass")
-
-        # logging.info("Using Transformer-like TreeBuilder")
-
-        # def process_node(idx, current_level_nodes, new_level_nodes, all_tree_nodes, next_node_index, lock):
-        #     relevant_nodes_chunk = self.get_relevant_nodes(
-        #         current_level_nodes[idx], current_level_nodes
-        #     )
-
-        #     node_texts = get_text(relevant_nodes_chunk)
-
-        #     summarized_text = self.summarize(
-        #         context=node_texts,
-        #         max_tokens=self.summarization_length,
-        #     )
-
-        #     logging.info(
-        #         f"Node Texts Length: {len(self.tokenizer.encode(node_texts))}, Summarized Text Length: {len(self.tokenizer.encode(summarized_text))}"
-        #     )
-
-        #     next_node_index, new_parent_node = self.create_node(
-        #         next_node_index,
-        #         summarized_text,
-        #         {node.index for node in relevant_nodes_chunk}
-        #     )
-
-        #     with lock:
-        #         new_level_nodes[next_node_index] = new_parent_node
-
-        # for layer in range(self.num_layers):
-        #     logging.info(f"Constructing Layer {layer}: ")
-
-        #     node_list_current_layer = get_node_list(current_level_nodes)
-        #     next_node_index = len(all_tree_nodes)
-
-        #     new_level_nodes = {}
-        #     lock = Lock()
-
-        #     if use_multithreading:
-        #         with ThreadPoolExecutor() as executor:
-        #             for idx in range(0, len(node_list_current_layer)):
-        #                 executor.submit(process_node, idx, node_list_current_layer, new_level_nodes, all_tree_nodes, next_node_index, lock)
-        #                 next_node_index += 1
-        #             executor.shutdown(wait=True)
-        #     else:
-        #         for idx in range(0, len(node_list_current_layer)):
-        #             process_node(idx, node_list_current_layer, new_level_nodes, all_tree_nodes, next_node_index, lock)
-
-        #     layer_to_nodes[layer + 1] = list(new_level_nodes.values())
-        #     current_level_nodes = new_level_nodes
-        #     all_tree_nodes.update(new_level_nodes)
-
-        # return new_level_nodes
