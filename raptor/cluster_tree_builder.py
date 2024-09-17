@@ -134,4 +134,16 @@ class ClusterTreeBuilder(TreeBuilder):
             current_level_nodes = new_level_nodes
             all_tree_nodes.update(new_level_nodes)
 
-        return current_level_nodes
+        root_nodes = [node for _, node in current_level_nodes.items()]
+        root_node_texts = get_text(root_nodes)
+        summarized_text = self.summarize(
+            context=root_node_texts,
+            max_tokens=self.config.summarization_length,
+        )
+        _, new_root_node = self.create_node(
+            next_node_index, summarized_text, {node["index"] for node in root_nodes}
+        )
+        all_tree_nodes.update({next_node_index: new_root_node})
+        layer_to_nodes[len(layer_to_nodes)] = [new_root_node]
+
+        return {next_node_index: new_root_node}
