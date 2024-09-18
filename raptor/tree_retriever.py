@@ -10,7 +10,7 @@ import numpy as np
 from .embedding_models import IEmbeddingModel
 from .token_counter import BaseTokenCounter, BytePairTokenCounter
 from .tree_structures import Node
-from .storages import IStorage
+from .storages import IStorageSearch
 
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
@@ -40,7 +40,7 @@ class TreeRetriever(Generic[_CHUNK]):
     class Config(Generic[_C]):
         """TreeRetriever config"""
 
-        storage: IStorage[_C] = dataclasses.field()
+        storage: IStorageSearch[_C] = dataclasses.field()
         limit: Union[TreeRetriever.Limit.TopK, TreeRetriever.Limit.Threshold] = (
             dataclasses.field()
         )

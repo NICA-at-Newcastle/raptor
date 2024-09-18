@@ -1,8 +1,9 @@
-from .base import IStorage
+from .base import IStorageSave, IStorageSearch
 from .memory_storage import MemoryStorage
 
 
 __all__ = (
-    "IStorage",
+    "IStorageSave",
+    "IStorageSearch",
     "MemoryStorage",
 )

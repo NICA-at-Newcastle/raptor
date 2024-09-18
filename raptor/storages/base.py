@@ -3,11 +3,11 @@ import numpy as np
 from ..tree_structures import Node
 
 
-_CHUNK_contra = TypeVar("_CHUNK_contra", contravariant=True)
+_CHUNK_contra = TypeVar("_CHUNK_contra", contravariant=False, covariant=False)
 
 
-class IStorage(Protocol, Generic[_CHUNK_contra]):
-    """Defines the methods required for a raptor storage."""
+class IStorageSearch(Protocol, Generic[_CHUNK_contra]):
+    """Defines the methods required for a raptor search."""
 
     def search(
         self,
@@ -16,6 +16,10 @@ class IStorage(Protocol, Generic[_CHUNK_contra]):
         layer: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> Iterable[tuple[Node[_CHUNK_contra], float]]: ...
+
+
+class IStorageSave(Protocol, Generic[_CHUNK_contra]):
+    """Defines the methods required for a raptor tree build."""
 
     def create_node(
         self,

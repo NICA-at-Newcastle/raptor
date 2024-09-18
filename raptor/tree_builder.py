@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .embedding_models import IEmbeddingModel
 from .summarization_models import ISummarizationModel
-from .storages import IStorage
+from .storages import IStorageSave
 from .tree_structures import Node, Tree
 from .token_counter import BaseTokenCounter, BytePairTokenCounter
 from .utils import (
@@ -35,7 +35,7 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
 
         summarization_model: ISummarizationModel[_C] = dataclasses.field()
         embedding_model: IEmbeddingModel[_C] = dataclasses.field()
-        storage: IStorage[_C] = dataclasses.field()
+        storage: IStorageSave[_C] = dataclasses.field()
         cluster_embedding_model: int = dataclasses.field(default=0)
         token_counter: BaseTokenCounter = dataclasses.field(
             default=BytePairTokenCounter()
