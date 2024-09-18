@@ -1,28 +1,27 @@
 from __future__ import annotations
 import itertools
 import logging
-from typing import List, Optional, Literal, TypedDict, overload, Union, Iterable
+from typing import (
+    List, Optional, TypedDict, Union, Iterable,
+    TypeVar, Generic,
+)
 import dataclasses
 import numpy as np
-from .embedding_models import BaseEmbeddingModel
+from .embedding_models import IEmbeddingModel
 from .token_counter import BaseTokenCounter, BytePairTokenCounter
-from .tree_structures import Node, Tree
-from .utils import (
-    distances_from_embeddings,
-    get_embeddings,
-    get_node_list,
-    get_text,
-    indices_of_nearest_neighbors_from_distances,
-    reverse_mapping,
-)
-from .storages import BaseStorage
+from .tree_structures import Node
+from .storages import IStorage
 
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
+_CHUNK = TypeVar("_CHUNK")
+_C = TypeVar("_C")
 
-class TreeRetriever:
+class TreeRetriever(Generic[_CHUNK]):
+    """Retrieves nodes from tree using raptor search."""
 
     class Limit:
+        """TreeRetriever limit methods"""
         class TopK(int):
             """TopK(top_k)"""
 
@@ -30,6 +29,7 @@ class TreeRetriever:
             """Threshold(threshold)"""
 
     class SearchMethod:
+        """TreeRetriever search methods"""
         class Flatten(tuple[int, int]):
             """Flatten((top_k, max_tokens))"""
 
@@ -37,13 +37,14 @@ class TreeRetriever:
             """Tree(start_layer)"""
 
     @dataclasses.dataclass
-    class Config:
+    class Config(Generic[_C]):
+        """TreeRetriever config"""
 
-        storage: BaseStorage = dataclasses.field()
+        storage: IStorage[_C] = dataclasses.field()
         limit: Union[TreeRetriever.Limit.TopK, TreeRetriever.Limit.Threshold] = (
             dataclasses.field()
         )
-        embedding_model: BaseEmbeddingModel = dataclasses.field()
+        embedding_model: IEmbeddingModel[_C] = dataclasses.field()
         token_counter: BaseTokenCounter = dataclasses.field(
             default=BytePairTokenCounter()
         )
@@ -56,6 +57,7 @@ class TreeRetriever:
                 raise ValueError("start_layer must be >= 0")
 
         def log_config(self):
+            """Returns string formatted config."""
             return f"""
             TreeRetriever.Config:
                 TokenCounter: {self.token_counter}
@@ -64,7 +66,10 @@ class TreeRetriever:
                 Limit: {self.limit}
             """
 
-    def __init__(self, config: Config) -> None:
+    def __init__(
+        self,
+        config: Config[_CHUNK],
+    ) -> None:
 
         self.storage = config.storage
         self.token_counter = config.token_counter
@@ -84,7 +89,7 @@ class TreeRetriever:
         )
 
     def _create_embedding(self, text: str) -> np.ndarray:
-        return self.embedding_model.create_embedding(text)
+        return self.embedding_model.create_text_embedding(text)
 
     def retrieve_information_collapse_tree(
         self,
@@ -187,7 +192,7 @@ class TreeRetriever:
         self,
         query: str,
         start_layer: int,
-    ) -> tuple[list[Node], str]:
+    ) -> Iterable[Node[_CHUNK]]:
         """
         Retrieves the most relevant information from the tree based on the query.
         Recursively iterates to query embeddings on child nodes.
@@ -220,37 +225,18 @@ class TreeRetriever:
         selected_nodes.extend(child_selected_nodes)
         del child_selected_nodes
 
-        context = get_text(selected_nodes)
-        return selected_nodes, context
+        return selected_nodes
 
     class LayerInformation(TypedDict):
+        """Dict containing the node and layer numbers."""
         node_index: int
         layer_number: int
 
-    @overload
     def retrieve(
         self,
         query: str,
         search_method: Union[SearchMethod.Flatten, SearchMethod.Tree],
-        return_layer_information: Literal[False] = False,
-    ) -> str:
-        pass
-
-    @overload
-    def retrieve(
-        self,
-        query: str,
-        search_method: Union[SearchMethod.Flatten, SearchMethod.Tree],
-        return_layer_information: Literal[True] = True,
-    ) -> tuple[str, list[LayerInformation]]:
-        pass
-
-    def retrieve(
-        self,
-        query: str,
-        search_method: Union[SearchMethod.Flatten, SearchMethod.Tree],
-        return_layer_information: bool = False,
-    ) -> str | tuple[str, list[LayerInformation]]:
+    ) -> list[Node[_CHUNK]]:
         """
         Queries the tree and returns the most relevant information.
 
@@ -269,34 +255,16 @@ class TreeRetriever:
             case self.SearchMethod.Tree(start_layer):
                 if start_layer < 0:
                     raise ValueError("Start layer must be >= 0")
-                selected_nodes, context = self._retrieve_information_tree_search(
+                selected_nodes = list(self._retrieve_information_tree_search(
                     query,
                     start_layer,
-                )
+                ))
             case self.SearchMethod.Flatten((top_k, max_tokens)):
                 if top_k < 1:
                     raise ValueError("top_k must be >= 0")
                 if max_tokens < 1:
                     raise ValueError("max_tokens must be an integer and at least 1")
-                logging.info(f"Using collapsed_tree")
-                selected_nodes, context = self.retrieve_information_collapse_tree(
-                    query,
-                    top_k,
-                    max_tokens,
-                )
+                logging.info("Using collapsed_tree")
+                selected_nodes = list(self.retrieve_information_collapse_tree(query))
 
-        if return_layer_information:
-
-            layer_information: list[TreeRetriever.LayerInformation] = []
-
-            for node in selected_nodes:
-                layer_information.append(
-                    {
-                        "node_index": node["index"],
-                        "layer_number": self.tree_node_index_to_layer[node["index"]],
-                    }
-                )
-
-            return context, layer_information
-
-        return context
+        return selected_nodes

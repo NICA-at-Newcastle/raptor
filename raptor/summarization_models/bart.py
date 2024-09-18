@@ -1,8 +1,7 @@
 from transformers import pipeline
-from ._base import BaseSummarizationModel
 
 
-class BartSummarizationModel(BaseSummarizationModel):
+class BartSummarizationModel:
 
     def __init__(self):
         self.summarizer = pipeline("summarization")

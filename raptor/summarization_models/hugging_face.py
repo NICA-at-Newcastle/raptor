@@ -1,13 +1,12 @@
 import logging
 import torch
-from raptor.summarization_models import BaseSummarizationModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 logger = logging.getLogger(__name__)
 
 
-class HFSummarizationModel(BaseSummarizationModel):
+class HFSummarizationModel:
 
     def __init__(self, model_name: str):
 

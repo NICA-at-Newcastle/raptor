@@ -2,17 +2,17 @@ import logging
 import random
 from abc import abstractmethod
 import dataclasses
-from typing import List, Optional
+from typing import List, Optional, override, TypeVar, Generic
 
 import numpy as np
 import umap
 from sklearn.mixture import GaussianMixture
+from .token_counter import BaseTokenCounter, BytePairTokenCounter
+from .tree_structures import Node
 
 # Initialize logging
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
-from .token_counter import BaseTokenCounter, BytePairTokenCounter
-from .tree_structures import Node
 
 # Import necessary methods from other modules
 
@@ -124,29 +124,40 @@ def perform_clustering(
         total_clusters += n_local_clusters
 
     if verbose:
-        logging.info(f"Total Clusters: {total_clusters}")
+        logging.info("Total Clusters: %s", total_clusters)
     return all_local_clusters
 
 
-class ClusteringAlgorithm:
+_CHUNK = TypeVar("_CHUNK")
+_C = TypeVar("_C")
+
+
+class ClusteringAlgorithm(Generic[_CHUNK]):
+    """
+    Base clustering algorithm. Clusters the given nodes into a list of clusters.
+    """
+
     @abstractmethod
     def __call__(
         self,
-        nodes: List[Node],
-        embedding_model_name: str,
-    ) -> list[list[Node]]:
-        raise NotImplemented("Implement in subclass")
+        nodes: List[Node[_CHUNK]],
+    ) -> list[list[Node[_CHUNK]]]:
+        raise NotImplementedError("Implement in subclass")
 
     @property
     @abstractmethod
     def reduction_dimension(self) -> int:
-        raise NotImplemented("Implement in subclass")
+        """Returns the reduction dimension of the clustering algorithm."""
+        raise NotImplementedError("Implement in subclass")
 
 
-class RAPTOR_Clustering(ClusteringAlgorithm):
+class RAPTOR_Clustering(ClusteringAlgorithm[_CHUNK]):
+    """Base Raptor clustering algorithm"""
 
     @dataclasses.dataclass
-    class Config:
+    class Config(Generic[_C]):
+        """Raptor clustering algorithm config."""
+
         max_length_in_cluster: int = dataclasses.field(default=3500)
         token_counter: BaseTokenCounter = dataclasses.field(
             default_factory=BytePairTokenCounter
@@ -155,18 +166,16 @@ class RAPTOR_Clustering(ClusteringAlgorithm):
         threshold: float = dataclasses.field(default=0.1)
         verbose: bool = dataclasses.field(default=False)
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config[_CHUNK]):
         self.config = config
 
+    @override
     def __call__(
         self,
-        nodes: List[Node],
-        embedding_model_name: str,
-    ) -> list[list[Node]]:
+        nodes: List[Node[_CHUNK]],
+    ) -> list[list[Node[_CHUNK]]]:
         # Get the embeddings from the nodes
-        embeddings = np.array(
-            [node["embeddings"][embedding_model_name] for node in nodes]
-        )
+        embeddings = np.array([node["embedding"] for node in nodes])
 
         # Perform the clustering
         clusters = perform_clustering(
@@ -193,26 +202,22 @@ class RAPTOR_Clustering(ClusteringAlgorithm):
 
             # Calculate the total length of the text in the nodes
             total_length = sum(
-                [self.config.token_counter(node["text"]) for node in cluster_nodes]
+                [self.config.token_counter(node["chunk"]) for node in cluster_nodes]
             )
 
             # If the total length exceeds the maximum allowed length, recluster this cluster
             if total_length > self.config.max_length_in_cluster:
                 if self.config.verbose:
                     logging.info(
-                        f"reclustering cluster with {len(cluster_nodes)} nodes"
+                        "reclustering cluster with %s nodes", len(cluster_nodes)
                     )
-                node_clusters.extend(
-                    self(
-                        cluster_nodes,
-                        embedding_model_name,
-                    )
-                )
+                node_clusters.extend(self(cluster_nodes))
             else:
                 node_clusters.append(cluster_nodes)
 
         return node_clusters
 
     @property
+    @override
     def reduction_dimension(self) -> int:
         return self.config.reduction_dimension

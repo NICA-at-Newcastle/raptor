@@ -1,16 +1,15 @@
-import logging
-from abc import ABC, abstractmethod
+from typing import Generic, TypeVar, Protocol
 import numpy as np
 
-logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
+_CHUNK_contra = TypeVar("_CHUNK_contra", contravariant=True)
 
 
-class BaseEmbeddingModel(ABC):
-    @abstractmethod
-    def create_embedding(self, text) -> np.ndarray:
-        pass
+class IEmbeddingModel(Protocol, Generic[_CHUNK_contra]):
+    """Defines the methods required for a raptor embedding model."""
+
+    def create_embedding(self, chunk: _CHUNK_contra) -> np.ndarray: ...
+
+    def create_text_embedding(self, text: str) -> np.ndarray: ...
 
     @property
-    @abstractmethod
-    def slug(self) -> str:
-        raise NotImplementedError("Implement in subclass")
+    def slug(self) -> str: ...

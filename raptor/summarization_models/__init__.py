@@ -1,4 +1,4 @@
-from ._base import BaseSummarizationModel
+from ._base import ISummarizationModel
 from .debug import DebugSummarizationModel
 from .bart import BartSummarizationModel
 from .hugging_face import HFSummarizationModel
@@ -10,7 +10,7 @@ from .open_ai import (
 
 
 __all__ = (
-    "BaseSummarizationModel",
+    "ISummarizationModel",
     "DebugSummarizationModel",
     "BartSummarizationModel",
     "HFSummarizationModel",

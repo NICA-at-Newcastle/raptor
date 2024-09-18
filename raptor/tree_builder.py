@@ -1,28 +1,28 @@
+"""Tree builder"""
 import copy
 import logging
 import dataclasses
-from typing import Literal
+from typing import Literal, TypeVar, Dict, List, Optional, Set, Tuple, Generic
 from abc import abstractmethod, ABC
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, List, Optional, Set, Tuple
 
-import numpy as np
-
-from .embedding_models import BaseEmbeddingModel
-from .summarization_models import BaseSummarizationModel
+from .embedding_models import IEmbeddingModel
+from .summarization_models import ISummarizationModel
+from .storages import IStorage
 from .tree_structures import Node, Tree
 from .token_counter import BaseTokenCounter, BytePairTokenCounter
 from .utils import (
     distances_from_embeddings,
     get_embeddings,
     indices_of_nearest_neighbors_from_distances,
-    split_text,
 )
 
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
+_CHUNK = TypeVar("_CHUNK")
+_C = TypeVar("_C")
 
-class TreeBuilder(ABC):
+class TreeBuilder(ABC, Generic[_CHUNK]):
     """
     The TreeBuilder class is responsible for building a hierarchical text abstraction
     structure, known as a "tree," using summarization models and
@@ -30,10 +30,12 @@ class TreeBuilder(ABC):
     """
 
     @dataclasses.dataclass
-    class Config:
+    class Config(Generic[_C]):
+        """TreeBuilder config"""
 
-        summarization_model: BaseSummarizationModel = dataclasses.field()
-        embedding_models: list[BaseEmbeddingModel] = dataclasses.field()
+        summarization_model: ISummarizationModel[_C] = dataclasses.field()
+        embedding_model: IEmbeddingModel[_C] = dataclasses.field()
+        storage: IStorage[_C] = dataclasses.field()
         cluster_embedding_model: int = dataclasses.field(default=0)
         token_counter: BaseTokenCounter = dataclasses.field(
             default=BytePairTokenCounter()
@@ -64,10 +66,8 @@ class TreeBuilder(ABC):
             if self.summarization_length < 1:
                 raise ValueError("summarization length must be at least 1")
 
-            if len(self.embedding_models) == 0:
-                raise ValueError("Must specifify at least 1 embedding model")
-
-        def log_config(self):
+        def log_config(self) -> str:
+            """Return a formatted string of the config."""
             return f"""
             TreeBuilderConfig:
                 Max Tokens: {self.max_tokens}
@@ -77,21 +77,26 @@ class TreeBuilder(ABC):
                 Selection Mode: {self.selection_mode}
                 Summarization Length: {self.summarization_length}
                 Summarization Model: {self.summarization_model}
-                Embedding Models: {self.embedding_models}
+                Embedding Model: {self.embedding_model}
                 Cluster Embedding Model: {self.cluster_embedding_model}
             """
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config[_CHUNK]) -> None:
         """Initializes the tokenizer, maximum tokens, number of layers, top-k value, threshold, and selection mode."""
 
-        self.config: TreeBuilder.Config = config
+        self.config: TreeBuilder.Config[_CHUNK] = config
 
         logging.info(
             "Successfully initialized TreeBuilder with Config %s", config.log_config()
         )
 
     def create_node(
-        self, index: int, text: str, children_indices: Optional[Set[int]] = None
+        self,
+        index: int,
+        chunk: _CHUNK,
+        layer: int,
+        children_indices: Optional[Set[int]] = None,
+        is_root: bool = False,
     ) -> Tuple[int, Node]:
         """Creates a new node with the given index, text, and (optionally) children indices.
 
@@ -107,35 +112,19 @@ class TreeBuilder(ABC):
         if children_indices is None:
             children_indices = set()
 
-        embeddings = {
-            model.slug: model.create_embedding(text)
-            for model in self.config.embedding_models
-        }
-        return (
+        embedding = self.config.embedding_model.create_embedding(chunk)
+
+        node = self.config.storage.create_node(
+            chunk,
             index,
-            {
-                "text": text,
-                "index": index,
-                "children": children_indices,
-                "embeddings": embeddings,
-            },
+            layer,
+            embedding,
+            children_indices,
+            is_root,
         )
+        return (index, node)
 
-    def create_embedding(self, text) -> np.ndarray:
-        """
-        Generates embeddings for the given text using the specified embedding model.
-
-        Args:
-            text (str): The text for which to generate embeddings.
-
-        Returns:
-            List[float]: The generated embeddings.
-        """
-        return self.config.embedding_models[
-            self.config.cluster_embedding_model
-        ].create_embedding(text)
-
-    def summarize(self, context, max_tokens=150) -> str:
+    def summarize(self, context: list[_CHUNK], max_tokens=150) -> _CHUNK:
         """
         Generates a summary of the input context using the specified summarization model.
 
@@ -148,7 +137,7 @@ class TreeBuilder(ABC):
         """
         return self.config.summarization_model.summarize(context, max_tokens)
 
-    def get_relevant_nodes(self, current_node, list_nodes) -> List[Node]:
+    def get_relevant_nodes(self, current_node: Node, list_nodes: list[Node]) -> List[Node]:
         """
         Retrieves the top-k most relevant nodes to the current node from the list of nodes
         based on cosine distance in the embedding space.
@@ -160,12 +149,9 @@ class TreeBuilder(ABC):
         Returns:
             List[Node]: The top-k most relevant nodes.
         """
-        embeddings = get_embeddings(
-            list_nodes,
-            self.config.embedding_models[self.config.cluster_embedding_model].slug,
-        )
+        embeddings = get_embeddings(list_nodes)
         distances = distances_from_embeddings(
-            current_node.embeddings[self.config.cluster_embedding_model], embeddings
+            current_node["embedding"], embeddings
         )
         indices = indices_of_nearest_neighbors_from_distances(distances)
 
@@ -183,7 +169,7 @@ class TreeBuilder(ABC):
 
         return nodes_to_add
 
-    def multithreaded_create_leaf_nodes(self, chunks: List[str]) -> Dict[int, Node]:
+    def multithreaded_create_leaf_nodes(self, chunks: List[_CHUNK]) -> Dict[int, Node]:
         """Creates leaf nodes using multithreading from the given list of text chunks.
 
         Args:
@@ -194,7 +180,7 @@ class TreeBuilder(ABC):
         """
         with ThreadPoolExecutor() as executor:
             future_nodes = {
-                executor.submit(self.create_node, index, text): (index, text)
+                executor.submit(self.create_node, index, text, 0): (index, text)
                 for index, text in enumerate(chunks)
             }
 
@@ -207,7 +193,7 @@ class TreeBuilder(ABC):
 
     def build_from_chunks(
         self,
-        chunks: list[str],
+        chunks: list[_CHUNK],
         use_multithreading: bool = True
     ) -> Tree:
         """Builds a tree using the pre-computed chunks."""
@@ -218,18 +204,34 @@ class TreeBuilder(ABC):
         else:
             leaf_nodes = {}
             for index, text in enumerate(chunks):
-                _, node = self.create_node(index, text)
+                _, node = self.create_node(index, text, 0)
                 leaf_nodes[index] = node
 
         layer_to_nodes = {0: list(leaf_nodes.values())}
 
-        logging.info(f"Created {len(leaf_nodes)} Leaf Embeddings")
+        logging.info("Created %s Leaf Embeddings", len(leaf_nodes))
 
         logging.info("Building All Nodes")
 
         all_nodes = copy.deepcopy(leaf_nodes)
 
         root_nodes = self.construct_tree(all_nodes, all_nodes, layer_to_nodes)
+
+        root_nodes_list = root_nodes.values()
+        summarized_text = self.summarize(
+            context=[node["chunk"] for node in root_nodes_list],
+            max_tokens=self.config.summarization_length,
+        )
+        next_node_index = max(root_nodes.keys()) + 1
+        _, new_root_node = self.create_node(
+            next_node_index,
+            summarized_text,
+            len(layer_to_nodes),
+            {node["index"] for node in root_nodes_list},
+            True,
+        )
+        all_nodes.update({next_node_index: new_root_node})
+        layer_to_nodes[len(layer_to_nodes)] = [new_root_node]
 
         return {
             "all_nodes": all_nodes,
@@ -239,20 +241,6 @@ class TreeBuilder(ABC):
             "layer_to_nodes": layer_to_nodes,
         }
 
-    def build_from_text(self, text: str, use_multithreading: bool = True) -> Tree:
-        """Builds a golden tree from the input text, optionally using multithreading.
-
-        Args:
-            text (str): The input text.
-            use_multithreading (bool, optional): Whether to use multithreading when creating leaf nodes.
-                Default: True.
-
-        Returns:
-            Tree: The golden tree structure.
-        """
-        chunks = split_text(text, self.config.token_counter, self.config.max_tokens)
-        return self.build_from_chunks(chunks, use_multithreading)
-        
 
     @abstractmethod
     def construct_tree(

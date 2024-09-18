@@ -1,9 +1,8 @@
 import numpy as np
 from sentence_transformers import SentenceTransformer
-from .base import BaseEmbeddingModel
 
 
-class SBertEmbeddingModel(BaseEmbeddingModel):
+class SBertEmbeddingModel:
 
     def __init__(self, model_name="sentence-transformers/multi-qa-mpnet-base-cos-v1"):
         self._model_name = model_name
@@ -13,6 +12,9 @@ class SBertEmbeddingModel(BaseEmbeddingModel):
         embeddings = self.model.encode(text)
         assert isinstance(embeddings, np.ndarray)
         return embeddings
+
+    def create_text_embedding(self, text):
+        return self.create_embedding(text)
 
     @property
     def slug(self) -> str:

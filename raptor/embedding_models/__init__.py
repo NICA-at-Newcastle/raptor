@@ -1,7 +1,7 @@
-from .base import BaseEmbeddingModel
+from .base import IEmbeddingModel
 from .sbert import SBertEmbeddingModel
 
 __all__ = (
-    "BaseEmbeddingModel",
+    "IEmbeddingModel",
     "SBertEmbeddingModel",
 )

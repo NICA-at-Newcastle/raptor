@@ -1,16 +1,14 @@
-from abc import abstractmethod, ABC
+from typing import Generic, Protocol, TypeVar
 import math
 
 
-class BaseTokenCounter(ABC):
+_CHUNK_contra = TypeVar("_CHUNK_contra", contravariant=True)
+
+
+class BaseTokenCounter(Protocol, Generic[_CHUNK_contra]):
     """Base class for all token counters."""
 
-    @abstractmethod
-    def __call__(self, text: str) -> int:
-        """
-        Returns the number of tokens that would be present in the encoded text.
-        """
-        raise NotImplementedError("Implement in subclass")
+    def __call__(self, chunk: _CHUNK_contra) -> int: ...
 
 
 class BytePairTokenCounter(BaseTokenCounter):

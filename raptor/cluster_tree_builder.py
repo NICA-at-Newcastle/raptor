@@ -1,4 +1,4 @@
-from typing import override, Dict, List
+from typing import override, Dict, List, TypeVar
 import logging
 import dataclasses
 from concurrent.futures import ThreadPoolExecutor
@@ -8,17 +8,22 @@ from .cluster_utils import ClusteringAlgorithm, RAPTOR_Clustering
 from .tree_builder import TreeBuilder
 from .utils import (
     get_node_list,
-    get_text,
 )
 from .tree_structures import Node
 
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
 
-class ClusterTreeBuilder(TreeBuilder):
+_CHUNK = TypeVar("_CHUNK")
+_C = TypeVar("_C")
+
+
+class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
+    """Tree builder which uses clustering."""
 
     @dataclasses.dataclass
-    class Config(TreeBuilder.Config):
+    class Config(TreeBuilder.Config[_C]):
+        """ClusterTreeBuilder config"""
 
         clustering_algorithm: ClusteringAlgorithm = dataclasses.field(
             default_factory=lambda: RAPTOR_Clustering(RAPTOR_Clustering.Config())
@@ -31,13 +36,14 @@ class ClusterTreeBuilder(TreeBuilder):
             """
             return base_summary + cluster_tree_summary
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config[_CHUNK]) -> None:
         super().__init__(config)
 
         self.clustering_algorithm = config.clustering_algorithm
 
         logging.info(
-            f"Successfully initialized ClusterTreeBuilder with Config {config.log_config()}"
+            "Successfully initialized ClusterTreeBuilder with Config %s",
+            config.log_config(),
         )
 
     @override
@@ -54,34 +60,33 @@ class ClusterTreeBuilder(TreeBuilder):
 
         def process_cluster(
             cluster: list[Node],
+            layer: int,
             new_level_nodes: dict[int, Node],
             next_node_index: int,
             summarization_length: int,
             lock: Lock,
         ):
-            node_texts = get_text(cluster)
 
             summarized_text = self.summarize(
-                context=node_texts,
+                context=[node["chunk"] for node in cluster],
                 max_tokens=summarization_length,
             )
 
-            logging.info(
-                f"Node Texts Length: {self.config.token_counter(node_texts)}, Summarized Text Length: {self.config.token_counter(summarized_text)}"
-            )
-
             _, new_parent_node = self.create_node(
-                next_node_index, summarized_text, {node["index"] for node in cluster}
+                next_node_index,
+                summarized_text,
+                layer,
+                {node["index"] for node in cluster},
             )
 
             with lock:
                 new_level_nodes[next_node_index] = new_parent_node
 
         for layer in range(self.config.num_layers):
-
+            true_layer_number = layer + 1
             new_level_nodes = {}
 
-            logging.info(f"Constructing Layer {layer}")
+            logging.info(f"Constructing Layer {true_layer_number}")
 
             node_list_current_layer = get_node_list(current_level_nodes)
 
@@ -89,16 +94,13 @@ class ClusterTreeBuilder(TreeBuilder):
                 len(node_list_current_layer)
                 <= self.clustering_algorithm.reduction_dimension + 1
             ):
-                self.num_layers = layer
+                self.num_layers = true_layer_number
                 logging.info(
-                    f"Stopping Layer construction: Cannot Create More Layers. Total Layers in tree: {layer}"
+                    f"Stopping Layer construction: Cannot Create More Layers. Total Layers in tree: {true_layer_number}"
                 )
                 break
 
-            clusters = self.clustering_algorithm(
-                node_list_current_layer,
-                self.config.embedding_models[self.config.cluster_embedding_model].slug,
-            )
+            clusters = self.clustering_algorithm(node_list_current_layer)
 
             lock = Lock()
 
@@ -111,6 +113,7 @@ class ClusterTreeBuilder(TreeBuilder):
                         executor.submit(
                             process_cluster,
                             cluster,
+                            true_layer_number,
                             new_level_nodes,
                             next_node_index,
                             summarization_length,
@@ -123,6 +126,7 @@ class ClusterTreeBuilder(TreeBuilder):
                 for cluster in clusters:
                     process_cluster(
                         cluster,
+                        true_layer_number,
                         new_level_nodes,
                         next_node_index,
                         summarization_length,
@@ -130,20 +134,8 @@ class ClusterTreeBuilder(TreeBuilder):
                     )
                     next_node_index += 1
 
-            layer_to_nodes[layer + 1] = list(new_level_nodes.values())
+            layer_to_nodes[true_layer_number] = list(new_level_nodes.values())
             current_level_nodes = new_level_nodes
             all_tree_nodes.update(new_level_nodes)
 
-        root_nodes = [node for _, node in current_level_nodes.items()]
-        root_node_texts = get_text(root_nodes)
-        summarized_text = self.summarize(
-            context=root_node_texts,
-            max_tokens=self.config.summarization_length,
-        )
-        _, new_root_node = self.create_node(
-            next_node_index, summarized_text, {node["index"] for node in root_nodes}
-        )
-        all_tree_nodes.update({next_node_index: new_root_node})
-        layer_to_nodes[len(layer_to_nodes)] = [new_root_node]
-
-        return {next_node_index: new_root_node}
+        return current_level_nodes
