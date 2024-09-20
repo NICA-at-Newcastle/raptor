@@ -30,8 +30,8 @@ class TreeRetriever(Generic[_CHUNK]):
 
     class SearchMethod:
         """TreeRetriever search methods"""
-        class Flatten(tuple[int, int]):
-            """Flatten((top_k, max_tokens))"""
+        class Flatten():
+            """Flatten()"""
 
         class Tree(int):
             """Tree(start_layer)"""
@@ -258,11 +258,7 @@ class TreeRetriever(Generic[_CHUNK]):
                     query,
                     start_layer,
                 ))
-            case self.SearchMethod.Flatten((top_k, max_tokens)):
-                if top_k < 1:
-                    raise ValueError("top_k must be >= 0")
-                if max_tokens < 1:
-                    raise ValueError("max_tokens must be an integer and at least 1")
+            case self.SearchMethod.Flatten():
                 logging.info("Using collapsed_tree")
                 selected_nodes = list(self.retrieve_information_collapse_tree(query))
 
