@@ -100,7 +100,6 @@ class TreeRetriever(Generic[_CHUNK]):
 
         Args:
             query (str): The query text.
-            max_tokens (int): The maximum number of tokens.
 
         Returns:
             str: The context created using the most relevant nodes.

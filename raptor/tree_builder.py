@@ -41,7 +41,6 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
             default=BytePairTokenCounter()
         )
 
-        max_tokens: int = dataclasses.field(default=100)
         num_layers: int = dataclasses.field(default=5)
         threshold: float = dataclasses.field(default=0.5)
         top_k: int = dataclasses.field(default=5)
@@ -51,8 +50,6 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
         summarization_length: int = dataclasses.field(default=100)
 
         def __post_init__(self):
-            if self.max_tokens < 1:
-                raise ValueError("max_tokens must be at least 1")
 
             if self.num_layers < 1:
                 raise ValueError("num_layers must be at least 1")
@@ -70,7 +67,6 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
             """Return a formatted string of the config."""
             return f"""
             TreeBuilderConfig:
-                Max Tokens: {self.max_tokens}
                 Num Layers: {self.num_layers}
                 Threshold: {self.threshold}
                 Top K: {self.top_k}
@@ -124,18 +120,18 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
         )
         return (index, node)
 
-    def summarize(self, context: list[_CHUNK], max_tokens=150) -> _CHUNK:
+    def summarize(self, context: list[_CHUNK], max_characters=150) -> _CHUNK:
         """
         Generates a summary of the input context using the specified summarization model.
 
         Args:
             context (str, optional): The context to summarize.
-            max_tokens (int, optional): The maximum number of tokens in the generated summary. Defaults to 150.o
+            max_characters (int, optional): The maximum number of tokens in the generated summary. Defaults to 150.o
 
         Returns:
             str: The generated summary.
         """
-        return self.config.summarization_model.summarize(context, max_tokens)
+        return self.config.summarization_model.summarize(context, max_characters)
 
     def get_relevant_nodes(self, current_node: Node, list_nodes: list[Node]) -> List[Node]:
         """
@@ -220,7 +216,7 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
         root_nodes_list = root_nodes.values()
         summarized_text = self.summarize(
             context=[node["chunk"] for node in root_nodes_list],
-            max_tokens=self.config.summarization_length,
+            max_characters=self.config.summarization_length,
         )
         next_node_index = max(root_nodes.keys()) + 1
         _, new_root_node = self.create_node(

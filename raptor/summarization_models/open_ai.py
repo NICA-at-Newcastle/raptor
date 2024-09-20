@@ -22,7 +22,7 @@ class OpenAiSummarizationModel:
         self._model = model
 
     @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6))
-    def summarize(self, context, max_tokens=150) -> str:
+    def summarize(self, context, max_characters=150) -> str:
         response = self._client.chat.completions.create(
             model=self._model,
             messages=[
@@ -32,7 +32,7 @@ class OpenAiSummarizationModel:
                     "content": f"Write a summary of the following, including as many key details as possible: {context}:",
                 },
             ],
-            max_tokens=max_tokens,
+            max_tokens=max_characters,
             temperature=0,
         )
         content = response.choices[0].message.content

@@ -2,5 +2,5 @@
 
 
 class DebugSummarizationModel:
-    def summarize(self, context, max_tokens=150) -> str:
-        return context[:max_tokens]
+    def summarize(self, context, max_characters=150) -> str:
+        return context[:max_characters]

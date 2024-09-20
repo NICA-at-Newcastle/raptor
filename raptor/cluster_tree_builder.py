@@ -69,7 +69,7 @@ class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
 
             summarized_text = self.summarize(
                 context=[node["chunk"] for node in cluster],
-                max_tokens=summarization_length,
+                max_characters=summarization_length,
             )
 
             _, new_parent_node = self.create_node(
