@@ -252,8 +252,6 @@ class TreeRetriever(Generic[_CHUNK]):
 
         match search_method:
             case self.SearchMethod.Tree(start_layer):
-                if start_layer < 0:
-                    raise ValueError("Start layer must be >= 0")
                 selected_nodes = list(self._retrieve_information_tree_search(
                     query,
                     start_layer,
