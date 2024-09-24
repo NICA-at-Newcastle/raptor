@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 class HFSummarizationModel:
 
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str, max_characters: int = 150):
 
         self.device = (
             "cuda"
@@ -28,9 +28,11 @@ class HFSummarizationModel:
             self.device,
         )
 
-    def summarize(self, context, max_characters=150) -> str:
+        self._max_characters = max_characters
+
+    def summarize(self, context) -> str:
         model_inputs = self._tokenizer([context], return_tensors="pt").to(self.device)
         generated_ids = self._model.generate(
-            **model_inputs, max_new_tokens=max_characters, do_sample=True
+            **model_inputs, max_new_tokens=self._max_characters, do_sample=True
         )
         return self._tokenizer.batch_decode(generated_ids)[0].split("[/INST]")[1]

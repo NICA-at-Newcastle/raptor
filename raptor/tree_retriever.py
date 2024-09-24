@@ -8,7 +8,6 @@ from typing import (
 import dataclasses
 import numpy as np
 from .embedding_models import IEmbeddingModel
-from .token_counter import BaseTokenCounter, BytePairTokenCounter
 from .tree_structures import Node
 from .storages import IStorageSearch
 
@@ -45,9 +44,6 @@ class TreeRetriever(Generic[_CHUNK]):
             dataclasses.field()
         )
         embedding_model: IEmbeddingModel[_C] = dataclasses.field()
-        token_counter: BaseTokenCounter = dataclasses.field(
-            default=BytePairTokenCounter()
-        )
         max_iterations: int = dataclasses.field(default=100)
         start_layer: Optional[int] = dataclasses.field(default=0)
 
@@ -60,7 +56,6 @@ class TreeRetriever(Generic[_CHUNK]):
             """Returns string formatted config."""
             return f"""
             TreeRetriever.Config:
-                TokenCounter: {self.token_counter}
                 Embedding Model: {self.embedding_model}
                 Start Layer: {self.start_layer}
                 Limit: {self.limit}
@@ -72,7 +67,6 @@ class TreeRetriever(Generic[_CHUNK]):
     ) -> None:
 
         self.storage = config.storage
-        self.token_counter = config.token_counter
         self.embedding_model = config.embedding_model
         self.max_iterations = config.max_iterations
         self.limit = config.limit

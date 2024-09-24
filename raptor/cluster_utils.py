@@ -7,7 +7,6 @@ from typing import List, Optional, override, TypeVar, Generic
 import numpy as np
 import umap
 from sklearn.mixture import GaussianMixture
-from .token_counter import BaseTokenCounter, BytePairTokenCounter
 from .tree_structures import Node
 
 # Initialize logging
@@ -158,10 +157,6 @@ class RAPTOR_Clustering(ClusteringAlgorithm[_CHUNK]):
     class Config(Generic[_C]):
         """Raptor clustering algorithm config."""
 
-        max_length_in_cluster: int = dataclasses.field(default=3500)
-        token_counter: BaseTokenCounter = dataclasses.field(
-            default_factory=BytePairTokenCounter
-        )
         reduction_dimension: int = dataclasses.field(default=10)
         threshold: float = dataclasses.field(default=0.1)
         verbose: bool = dataclasses.field(default=False)
@@ -200,20 +195,7 @@ class RAPTOR_Clustering(ClusteringAlgorithm[_CHUNK]):
                 node_clusters.append(cluster_nodes)
                 continue
 
-            # Calculate the total length of the text in the nodes
-            total_length = sum(
-                [self.config.token_counter(node["chunk"]) for node in cluster_nodes]
-            )
-
-            # If the total length exceeds the maximum allowed length, recluster this cluster
-            if total_length > self.config.max_length_in_cluster:
-                if self.config.verbose:
-                    logging.info(
-                        "reclustering cluster with %s nodes", len(cluster_nodes)
-                    )
-                node_clusters.extend(self(cluster_nodes))
-            else:
-                node_clusters.append(cluster_nodes)
+            node_clusters.append(cluster_nodes)
 
         return node_clusters
 

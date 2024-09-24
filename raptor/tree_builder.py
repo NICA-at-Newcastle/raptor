@@ -10,7 +10,6 @@ from .embedding_models import IEmbeddingModel
 from .summarization_models import ISummarizationModel
 from .storages import IStorageSave
 from .tree_structures import Node, Tree
-from .token_counter import BaseTokenCounter, BytePairTokenCounter
 from .utils import (
     distances_from_embeddings,
     get_embeddings,
@@ -37,9 +36,6 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
         embedding_model: IEmbeddingModel[_C] = dataclasses.field()
         storage: IStorageSave[_C] = dataclasses.field()
         cluster_embedding_model: int = dataclasses.field(default=0)
-        token_counter: BaseTokenCounter = dataclasses.field(
-            default=BytePairTokenCounter()
-        )
 
         num_layers: int = dataclasses.field(default=5)
         threshold: float = dataclasses.field(default=0.5)
@@ -47,7 +43,6 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
         selection_mode: Literal["top_k", "threshold"] = dataclasses.field(
             default="top_k"
         )
-        summarization_length: int = dataclasses.field(default=100)
 
         def __post_init__(self):
 
@@ -60,9 +55,6 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
             if self.top_k < 1:
                 raise ValueError("top_k must be at least 1")
 
-            if self.summarization_length < 1:
-                raise ValueError("summarization length must be at least 1")
-
         def log_config(self) -> str:
             """Return a formatted string of the config."""
             return f"""
@@ -71,7 +63,6 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
                 Threshold: {self.threshold}
                 Top K: {self.top_k}
                 Selection Mode: {self.selection_mode}
-                Summarization Length: {self.summarization_length}
                 Summarization Model: {self.summarization_model}
                 Embedding Model: {self.embedding_model}
                 Cluster Embedding Model: {self.cluster_embedding_model}
@@ -120,7 +111,7 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
         )
         return (index, node)
 
-    def summarize(self, context: list[_CHUNK], max_characters=150) -> _CHUNK:
+    def summarize(self, context: list[_CHUNK]) -> _CHUNK:
         """
         Generates a summary of the input context using the specified summarization model.
 
@@ -131,7 +122,7 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
         Returns:
             str: The generated summary.
         """
-        return self.config.summarization_model.summarize(context, max_characters)
+        return self.config.summarization_model.summarize(context)
 
     def get_relevant_nodes(self, current_node: Node, list_nodes: list[Node]) -> List[Node]:
         """
@@ -216,7 +207,6 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
         root_nodes_list = root_nodes.values()
         summarized_text = self.summarize(
             context=[node["chunk"] for node in root_nodes_list],
-            max_characters=self.config.summarization_length,
         )
         next_node_index = max(root_nodes.keys()) + 1
         _, new_root_node = self.create_node(

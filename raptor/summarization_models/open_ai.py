@@ -14,15 +14,17 @@ class OpenAiSummarizationModel:
         model: str,
         api_key: str | None = None,
         endpoint: str | None = None,
+        max_characters: int = 150,
     ):
         self._client = OpenAI(
             base_url=endpoint,
             api_key=api_key,
         )
         self._model = model
+        self._max_characters = max_characters
 
     @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6))
-    def summarize(self, context, max_characters=150) -> str:
+    def summarize(self, context) -> str:
         response = self._client.chat.completions.create(
             model=self._model,
             messages=[
@@ -32,7 +34,7 @@ class OpenAiSummarizationModel:
                     "content": f"Write a summary of the following, including as many key details as possible: {context}:",
                 },
             ],
-            max_tokens=max_characters,
+            max_tokens=self._max_characters,
             temperature=0,
         )
         content = response.choices[0].message.content

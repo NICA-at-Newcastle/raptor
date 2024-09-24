@@ -63,13 +63,11 @@ class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
             layer: int,
             new_level_nodes: dict[int, Node],
             next_node_index: int,
-            summarization_length: int,
             lock: Lock,
         ):
 
             summarized_text = self.summarize(
                 context=[node["chunk"] for node in cluster],
-                max_characters=summarization_length,
             )
 
             _, new_parent_node = self.create_node(
@@ -104,9 +102,6 @@ class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
 
             lock = Lock()
 
-            summarization_length = self.config.summarization_length
-            logging.info(f"Summarization Length: {summarization_length}")
-
             if use_multithreading:
                 with ThreadPoolExecutor() as executor:
                     for cluster in clusters:
@@ -116,7 +111,6 @@ class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
                             true_layer_number,
                             new_level_nodes,
                             next_node_index,
-                            summarization_length,
                             lock,
                         )
                         next_node_index += 1
@@ -129,7 +123,6 @@ class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
                         true_layer_number,
                         new_level_nodes,
                         next_node_index,
-                        summarization_length,
                         lock,
                     )
                     next_node_index += 1
