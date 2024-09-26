@@ -158,6 +158,7 @@ class RAPTOR_Clustering(ClusteringAlgorithm[_CHUNK]):
         """Raptor clustering algorithm config."""
 
         reduction_dimension: int = dataclasses.field(default=10)
+        max_cluster_size: int = dataclasses.field(default=10)
         threshold: float = dataclasses.field(default=0.1)
         verbose: bool = dataclasses.field(default=False)
 
@@ -195,7 +196,15 @@ class RAPTOR_Clustering(ClusteringAlgorithm[_CHUNK]):
                 node_clusters.append(cluster_nodes)
                 continue
 
-            node_clusters.append(cluster_nodes)
+            # If the cluster exceeds maximum cluster size, recluster this cluster
+            if len(cluster_nodes) > self.config.max_cluster_size:
+                if self.config.verbose:
+                    logging.info(
+                        f"reclustering cluster with {len(cluster_nodes)} nodes"
+                    )
+                node_clusters.extend(self(cluster_nodes))
+            else:
+                node_clusters.append(cluster_nodes)
 
         return node_clusters
 
