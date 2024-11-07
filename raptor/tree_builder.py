@@ -1,4 +1,5 @@
 """Tree builder"""
+
 import copy
 import logging
 import dataclasses
@@ -20,6 +21,7 @@ logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
 _CHUNK = TypeVar("_CHUNK")
 _C = TypeVar("_C")
+
 
 class TreeBuilder(ABC, Generic[_CHUNK]):
     """
@@ -124,7 +126,11 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
         """
         return self.config.summarization_model.summarize(context)
 
-    def get_relevant_nodes(self, current_node: Node, list_nodes: list[Node]) -> List[Node]:
+    def get_relevant_nodes(
+        self,
+        current_node: Node,
+        list_nodes: list[Node],
+    ) -> List[Node]:
         """
         Retrieves the top-k most relevant nodes to the current node from the list of nodes
         based on cosine distance in the embedding space.
@@ -137,9 +143,7 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
             List[Node]: The top-k most relevant nodes.
         """
         embeddings = get_embeddings(list_nodes)
-        distances = distances_from_embeddings(
-            current_node["embedding"], embeddings
-        )
+        distances = distances_from_embeddings(current_node["embedding"], embeddings)
         indices = indices_of_nearest_neighbors_from_distances(distances)
 
         match self.config.selection_mode:
@@ -181,10 +185,20 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
     def build_from_chunks(
         self,
         chunks: list[_CHUNK],
-        use_multithreading: bool = True
+        use_multithreading: bool = True,
     ) -> Tree:
         """Builds a tree using the pre-computed chunks."""
         logging.info("Creating Leaf Nodes")
+
+        if len(chunks) == 0:
+            logging.warning("No chunks provided, raptor tree will be empty")
+            return {
+                "all_nodes": {},
+                "root_nodes": {},
+                "leaf_nodes": {},
+                "num_layers": 0,
+                "layer_to_nodes": {},
+            }
 
         if use_multithreading:
             leaf_nodes = self.multithreaded_create_leaf_nodes(chunks)
@@ -226,7 +240,6 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
             "num_layers": self.config.num_layers,
             "layer_to_nodes": layer_to_nodes,
         }
-
 
     @abstractmethod
     def construct_tree(
