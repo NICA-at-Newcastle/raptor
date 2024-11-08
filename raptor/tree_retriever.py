@@ -2,8 +2,13 @@ from __future__ import annotations
 import itertools
 import logging
 from typing import (
-    List, Optional, TypedDict, Union, Iterable,
-    TypeVar, Generic,
+    List,
+    Optional,
+    TypedDict,
+    Union,
+    Iterable,
+    TypeVar,
+    Generic,
 )
 import dataclasses
 import numpy as np
@@ -16,11 +21,13 @@ logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 _CHUNK = TypeVar("_CHUNK")
 _C = TypeVar("_C")
 
+
 class TreeRetriever(Generic[_CHUNK]):
     """Retrieves nodes from tree using raptor search."""
 
     class Limit:
         """TreeRetriever limit methods"""
+
         class TopK(int):
             """TopK(top_k)"""
 
@@ -29,11 +36,20 @@ class TreeRetriever(Generic[_CHUNK]):
 
     class SearchMethod:
         """TreeRetriever search methods"""
-        class Flatten():
+
+        class Flatten:
             """Flatten()"""
 
         class Tree(int):
             """Tree(start_layer)"""
+
+    class StringQuery(str):
+        """StringQuery(query)"""
+
+    class ImageQuery(str):
+        """ImageQuery(file_path)"""
+
+    Query = Union[StringQuery, ImageQuery]
 
     @dataclasses.dataclass
     class Config(Generic[_C]):
@@ -43,7 +59,7 @@ class TreeRetriever(Generic[_CHUNK]):
         limit: Union[TreeRetriever.Limit.TopK, TreeRetriever.Limit.Threshold] = (
             dataclasses.field()
         )
-        embedding_model: IEmbeddingModel[_C] = dataclasses.field()
+        embedding_model: IEmbeddingModel[TreeRetriever.Query] = dataclasses.field()
         max_iterations: int = dataclasses.field(default=100)
         start_layer: Optional[int] = dataclasses.field(default=0)
 
@@ -82,12 +98,12 @@ class TreeRetriever(Generic[_CHUNK]):
             f"Successfully initialized TreeRetriever with Config {config.log_config()}"
         )
 
-    def _create_embedding(self, text: str) -> np.ndarray:
-        return self.embedding_model.create_text_embedding(text)
+    def _create_embedding(self, query: Query) -> np.ndarray:
+        return self.embedding_model.create_embedding(query)
 
     def retrieve_information_collapse_tree(
         self,
-        query: str,
+        query: Query,
     ) -> Iterable[Node]:
         """
         Retrieves the most relevant information from the tree based on the query.
@@ -222,6 +238,7 @@ class TreeRetriever(Generic[_CHUNK]):
 
     class LayerInformation(TypedDict):
         """Dict containing the node and layer numbers."""
+
         node_index: int
         layer_number: int
 
@@ -246,10 +263,12 @@ class TreeRetriever(Generic[_CHUNK]):
 
         match search_method:
             case self.SearchMethod.Tree(start_layer):
-                selected_nodes = list(self._retrieve_information_tree_search(
-                    query,
-                    start_layer,
-                ))
+                selected_nodes = list(
+                    self._retrieve_information_tree_search(
+                        query,
+                        start_layer,
+                    )
+                )
             case self.SearchMethod.Flatten():
                 logging.info("Using collapsed_tree")
                 selected_nodes = list(self.retrieve_information_collapse_tree(query))
