@@ -13,9 +13,6 @@ class SBertEmbeddingModel:
         assert isinstance(embeddings, np.ndarray)
         return embeddings
 
-    def create_text_embedding(self, text):
-        return self.create_embedding(text)
-
     @property
     def slug(self) -> str:
         return f"SBERT/{self._model_name}"
