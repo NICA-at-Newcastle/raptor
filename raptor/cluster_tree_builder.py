@@ -84,7 +84,7 @@ class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
             true_layer_number = layer + 1
             new_level_nodes = {}
 
-            logging.info(f"Constructing Layer {true_layer_number}")
+            logging.info("Constructing Layer %s", true_layer_number)
 
             node_list_current_layer = get_node_list(current_level_nodes)
 
@@ -94,10 +94,12 @@ class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
             ):
                 self.num_layers = true_layer_number
                 logging.info(
-                    f"Stopping Layer construction: Cannot Create More Layers. Total Layers in tree: {true_layer_number}"
+                    "Stopping Layer construction: Cannot Create More Layers. Total Layers in tree: %s",
+                    true_layer_number,
                 )
                 break
 
+            logging.info("Clustering %s nodes", len(node_list_current_layer))
             clusters = self.clustering_algorithm(node_list_current_layer)
 
             lock = Lock()

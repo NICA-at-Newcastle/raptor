@@ -177,6 +177,9 @@ class TreeRetriever(Generic[_CHUNK]):
             *(node["children"] for node in parent_nodes)
         )
 
+        if iteration_number >= self.max_iterations or len(child_node_indices) == 0:
+            return []
+
         nodes_to_add = list(
             self._retreive_information_from_storage(
                 query,
@@ -184,9 +187,6 @@ class TreeRetriever(Generic[_CHUNK]):
                 None,
             )
         )
-
-        if iteration_number >= self.max_iterations or len(child_node_indices) == 0:
-            return nodes_to_add
 
         return itertools.chain(
             nodes_to_add,

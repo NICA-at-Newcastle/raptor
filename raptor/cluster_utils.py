@@ -79,7 +79,7 @@ def perform_clustering(
     )
 
     if verbose:
-        logging.info(f"Global Clusters: {n_global_clusters}")
+        logging.info("Global Clusters: %s", n_global_clusters)
 
     all_local_clusters = [np.array([]) for _ in range(len(embeddings))]
     total_clusters = 0
@@ -90,7 +90,9 @@ def perform_clustering(
         ]
         if verbose:
             logging.info(
-                f"Nodes in Global Cluster {i}: {len(global_cluster_embeddings_)}"
+                "Nodes in Global Cluster %s: %s",
+                i,
+                len(global_cluster_embeddings_),
             )
         if len(global_cluster_embeddings_) == 0:
             continue
