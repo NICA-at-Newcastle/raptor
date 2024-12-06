@@ -1,13 +1,17 @@
+"""
+Raptor clustering algorithm using UMAP and Gaussian Mixture Models (GMM).
+"""
+
 import logging
 import random
-from abc import abstractmethod
 import dataclasses
 from typing import List, Optional, override, TypeVar, Generic
 
 import numpy as np
 import umap
 from sklearn.mixture import GaussianMixture
-from .tree_structures import Node
+from raptor.cluster_tree_builder import ClusteringAlgorithm
+from raptor.tree_structures import Node
 
 # Initialize logging
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
@@ -20,7 +24,7 @@ RANDOM_SEED = 224
 random.seed(RANDOM_SEED)
 
 
-def global_cluster_embeddings(
+def __global_cluster_embeddings(
     embeddings: np.ndarray,
     dim: int,
     n_neighbors: Optional[int] = None,
@@ -35,7 +39,7 @@ def global_cluster_embeddings(
     return reduced_embeddings
 
 
-def local_cluster_embeddings(
+def __local_cluster_embeddings(
     embeddings: np.ndarray, dim: int, num_neighbors: int = 10, metric: str = "cosine"
 ) -> np.ndarray:
     reduced_embeddings = umap.UMAP(
@@ -45,7 +49,7 @@ def local_cluster_embeddings(
     return reduced_embeddings
 
 
-def get_optimal_clusters(
+def __get_optimal_clusters(
     embeddings: np.ndarray, max_clusters: int = 50, random_state: int = RANDOM_SEED
 ) -> int:
     max_clusters = min(max_clusters, len(embeddings))
@@ -59,8 +63,8 @@ def get_optimal_clusters(
     return optimal_clusters
 
 
-def GMM_cluster(embeddings: np.ndarray, threshold: float, random_state: int = 0):
-    n_clusters = get_optimal_clusters(embeddings)
+def __gmm_cluster(embeddings: np.ndarray, threshold: float, random_state: int = 0):
+    n_clusters = __get_optimal_clusters(embeddings)
     gm = GaussianMixture(n_components=n_clusters, random_state=random_state)
     gm.fit(embeddings)
     probs = gm.predict_proba(embeddings)
@@ -68,13 +72,13 @@ def GMM_cluster(embeddings: np.ndarray, threshold: float, random_state: int = 0)
     return labels, n_clusters
 
 
-def perform_clustering(
+def __perform_clustering(
     embeddings: np.ndarray, dim: int, threshold: float, verbose: bool = False
 ) -> List[np.ndarray]:
-    reduced_embeddings_global = global_cluster_embeddings(
+    reduced_embeddings_global = __global_cluster_embeddings(
         embeddings, min(dim, len(embeddings) - 2)
     )
-    global_clusters, n_global_clusters = GMM_cluster(
+    global_clusters, n_global_clusters = __gmm_cluster(
         reduced_embeddings_global, threshold
     )
 
@@ -100,15 +104,19 @@ def perform_clustering(
             local_clusters = [np.array([0]) for _ in global_cluster_embeddings_]
             n_local_clusters = 1
         else:
-            reduced_embeddings_local = local_cluster_embeddings(
+            reduced_embeddings_local = __local_cluster_embeddings(
                 global_cluster_embeddings_, dim
             )
-            local_clusters, n_local_clusters = GMM_cluster(
+            local_clusters, n_local_clusters = __gmm_cluster(
                 reduced_embeddings_local, threshold
             )
 
         if verbose:
-            logging.info(f"Local Clusters in Global Cluster {i}: {n_local_clusters}")
+            logging.info(
+                "Local Clusters in Global Cluster %s: %s",
+                i,
+                n_local_clusters,
+            )
 
         for j in range(n_local_clusters):
             local_cluster_embeddings_ = global_cluster_embeddings_[
@@ -133,26 +141,7 @@ _CHUNK = TypeVar("_CHUNK")
 _C = TypeVar("_C")
 
 
-class ClusteringAlgorithm(Generic[_CHUNK]):
-    """
-    Base clustering algorithm. Clusters the given nodes into a list of clusters.
-    """
-
-    @abstractmethod
-    def __call__(
-        self,
-        nodes: List[Node[_CHUNK]],
-    ) -> list[list[Node[_CHUNK]]]:
-        raise NotImplementedError("Implement in subclass")
-
-    @property
-    @abstractmethod
-    def reduction_dimension(self) -> int:
-        """Returns the reduction dimension of the clustering algorithm."""
-        raise NotImplementedError("Implement in subclass")
-
-
-class RAPTOR_Clustering(ClusteringAlgorithm[_CHUNK]):
+class UMAPGMMClusteringAlgorithm(ClusteringAlgorithm[_CHUNK]):
     """Base Raptor clustering algorithm"""
 
     @dataclasses.dataclass
@@ -176,7 +165,7 @@ class RAPTOR_Clustering(ClusteringAlgorithm[_CHUNK]):
         embeddings = np.array([node["embedding"] for node in nodes])
 
         # Perform the clustering
-        clusters = perform_clustering(
+        clusters = __perform_clustering(
             embeddings,
             dim=self.config.reduction_dimension,
             threshold=self.config.threshold,
@@ -202,15 +191,11 @@ class RAPTOR_Clustering(ClusteringAlgorithm[_CHUNK]):
             if len(cluster_nodes) > self.config.max_cluster_size:
                 if self.config.verbose:
                     logging.info(
-                        f"reclustering cluster with {len(cluster_nodes)} nodes"
+                        "reclustering cluster with %s nodes",
+                        len(cluster_nodes),
                     )
                 node_clusters.extend(self(cluster_nodes))
             else:
                 node_clusters.append(cluster_nodes)
 
         return node_clusters
-
-    @property
-    @override
-    def reduction_dimension(self) -> int:
-        return self.config.reduction_dimension
