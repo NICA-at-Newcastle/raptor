@@ -160,7 +160,7 @@ class UMAPGMMClusteringAlgorithm(ClusteringAlgorithm[_CHUNK]):
     def __call__(
         self,
         nodes: List[Node[_CHUNK]],
-    ) -> list[list[Node[_CHUNK]]]:
+    ) -> tuple[list[list[Node[_CHUNK]]], list[Node[_CHUNK]]]:
         # Get the embeddings from the nodes
         embeddings = np.array([node["embedding"] for node in nodes])
 
@@ -198,4 +198,4 @@ class UMAPGMMClusteringAlgorithm(ClusteringAlgorithm[_CHUNK]):
             else:
                 node_clusters.append(cluster_nodes)
 
-        return node_clusters
+        return node_clusters, []

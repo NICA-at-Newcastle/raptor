@@ -28,7 +28,13 @@ class ClusteringAlgorithm(Generic[_CHUNK]):
     def __call__(
         self,
         nodes: List[Node[_CHUNK]],
-    ) -> list[list[Node[_CHUNK]]]:
+    ) -> tuple[list[list[Node[_CHUNK]]], list[Node[_CHUNK]]]:
+        """
+        Returns
+        -------
+        tuple[list[list[Node[_CHUNK]]], list[Node[_CHUNK]]]
+            A tuple containing the clusters and the outliers.
+        """
         raise NotImplementedError("Implement in subclass")
 
 
@@ -107,10 +113,13 @@ class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
             node_list_current_layer = get_node_list(current_level_nodes)
 
             logging.info("Clustering %s nodes", len(node_list_current_layer))
-            clusters = self.clustering_algorithm(node_list_current_layer)
+            clusters, outliers = self.clustering_algorithm(node_list_current_layer)
 
-            assert len(clusters) > 0, "No clusters found"
-            reduction_factor = len(node_list_current_layer) / len(clusters)
+            reduction_factor = (
+                0
+                if len(clusters) == 0
+                else len(node_list_current_layer) / len(clusters)
+            )
 
             if reduction_factor < self.target_reduction_factor:
                 self.num_layers = true_layer_number
