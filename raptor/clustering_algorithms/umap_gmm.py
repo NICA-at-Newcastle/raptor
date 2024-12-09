@@ -10,8 +10,9 @@ from typing import List, Optional, override, TypeVar, Generic
 import numpy as np
 import umap
 from sklearn.mixture import GaussianMixture
-from raptor.cluster_tree_builder import ClusteringAlgorithm
 from raptor.tree_structures import Node
+
+from .base import ClusteringAlgorithm
 
 # Initialize logging
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
@@ -24,12 +25,13 @@ RANDOM_SEED = 224
 random.seed(RANDOM_SEED)
 
 
-def __global_cluster_embeddings(
+def _global_cluster_embeddings(
     embeddings: np.ndarray,
     dim: int,
     n_neighbors: Optional[int] = None,
     metric: str = "cosine",
 ) -> np.ndarray:
+    assert len(embeddings) > 0, "Cannot cluster empty embeddings"
     if n_neighbors is None:
         n_neighbors = int((len(embeddings) - 1) ** 0.5)
     reduced_embeddings = umap.UMAP(
@@ -39,7 +41,7 @@ def __global_cluster_embeddings(
     return reduced_embeddings
 
 
-def __local_cluster_embeddings(
+def _local_cluster_embeddings(
     embeddings: np.ndarray, dim: int, num_neighbors: int = 10, metric: str = "cosine"
 ) -> np.ndarray:
     reduced_embeddings = umap.UMAP(
@@ -49,7 +51,7 @@ def __local_cluster_embeddings(
     return reduced_embeddings
 
 
-def __get_optimal_clusters(
+def _get_optimal_clusters(
     embeddings: np.ndarray, max_clusters: int = 50, random_state: int = RANDOM_SEED
 ) -> int:
     max_clusters = min(max_clusters, len(embeddings))
@@ -63,8 +65,8 @@ def __get_optimal_clusters(
     return optimal_clusters
 
 
-def __gmm_cluster(embeddings: np.ndarray, threshold: float, random_state: int = 0):
-    n_clusters = __get_optimal_clusters(embeddings)
+def _gmm_cluster(embeddings: np.ndarray, threshold: float, random_state: int = 0):
+    n_clusters = _get_optimal_clusters(embeddings)
     gm = GaussianMixture(n_components=n_clusters, random_state=random_state)
     gm.fit(embeddings)
     probs = gm.predict_proba(embeddings)
@@ -72,13 +74,13 @@ def __gmm_cluster(embeddings: np.ndarray, threshold: float, random_state: int = 
     return labels, n_clusters
 
 
-def __perform_clustering(
+def _perform_clustering(
     embeddings: np.ndarray, dim: int, threshold: float, verbose: bool = False
 ) -> List[np.ndarray]:
-    reduced_embeddings_global = __global_cluster_embeddings(
+    reduced_embeddings_global = _global_cluster_embeddings(
         embeddings, min(dim, len(embeddings) - 2)
     )
-    global_clusters, n_global_clusters = __gmm_cluster(
+    global_clusters, n_global_clusters = _gmm_cluster(
         reduced_embeddings_global, threshold
     )
 
@@ -104,10 +106,10 @@ def __perform_clustering(
             local_clusters = [np.array([0]) for _ in global_cluster_embeddings_]
             n_local_clusters = 1
         else:
-            reduced_embeddings_local = __local_cluster_embeddings(
+            reduced_embeddings_local = _local_cluster_embeddings(
                 global_cluster_embeddings_, dim
             )
-            local_clusters, n_local_clusters = __gmm_cluster(
+            local_clusters, n_local_clusters = _gmm_cluster(
                 reduced_embeddings_local, threshold
             )
 
@@ -165,11 +167,13 @@ class UMAPGMMClusteringAlgorithm(ClusteringAlgorithm[_CHUNK]):
         embeddings = np.array([node["embedding"] for node in nodes])
 
         # Perform the clustering
-        clusters = __perform_clustering(
+        clusters = _perform_clustering(
             embeddings,
             dim=self.config.reduction_dimension,
             threshold=self.config.threshold,
         )
+
+        logging.info("UMAP got %s clusters", len(clusters))
 
         # Initialize an empty list to store the clusters of nodes
         node_clusters = []
@@ -181,6 +185,9 @@ class UMAPGMMClusteringAlgorithm(ClusteringAlgorithm[_CHUNK]):
 
             # Add the corresponding nodes to the node_clusters list
             cluster_nodes = [nodes[i] for i in indices]
+
+            if len(cluster_nodes) == 0:
+                continue
 
             # Base case: if the cluster only has one node, do not attempt to recluster it
             if len(cluster_nodes) == 1:
@@ -194,7 +201,9 @@ class UMAPGMMClusteringAlgorithm(ClusteringAlgorithm[_CHUNK]):
                         "reclustering cluster with %s nodes",
                         len(cluster_nodes),
                     )
-                node_clusters.extend(self(cluster_nodes))
+                reclustered_nodes, reclustered_outliers = self(cluster_nodes)
+                node_clusters.extend(reclustered_nodes)
+                reclustered_outliers.extend(reclustered_outliers)
             else:
                 node_clusters.append(cluster_nodes)
 

@@ -11,7 +11,7 @@ class Node(TypedDict, Generic[_C]):
 
     chunk: _C
     index: int
-    children: set[int]
+    layer: int
     embedding: np.ndarray
 
 

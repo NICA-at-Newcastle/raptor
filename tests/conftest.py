@@ -1,52 +1,18 @@
 import json
 import pytest
 import numpy as np
-from raptor import ClusterTreeBuilder, TreeRetriever, Tree
+from raptor import ClusterTreeBuilder
 from raptor.summarization_models import BartSummarizationModel
 from raptor.embedding_models import SBertEmbeddingModel
 from raptor.storages.memory_storage import MemoryStorage
 
 
-@pytest.fixture
-def bart_summarization_model():
-    """Bart summarizer fixture"""
-    yield BartSummarizationModel()
-
-
-@pytest.fixture
-def sbert_embedder():
-    """SBert embedder fixture"""
-    yield SBertEmbeddingModel()
-
-
-@pytest.fixture
+@pytest.fixture(scope="session")
 def memory_storage():
     yield MemoryStorage()
 
 
-@pytest.fixture
-def tree_builder(bart_summarization_model, sbert_embedder, memory_storage):
-    yield ClusterTreeBuilder(
-        ClusterTreeBuilder.Config(
-            summarization_model=bart_summarization_model,
-            embedding_model=sbert_embedder,
-            storage=memory_storage,
-        )
-    )
-
-
-@pytest.fixture
-def tree_retriever(sbert_embedder, memory_storage):
-    yield TreeRetriever(
-        TreeRetriever.Config(
-            storage=memory_storage,
-            limit=TreeRetriever.Limit.TopK(5),
-            embedding_model=sbert_embedder,
-        )
-    )
-
-
-@pytest.fixture
+@pytest.fixture(scope="session")
 def cinderella_text():
     with open("tests/cinderella.txt", "r") as f:
         return f.read()
@@ -86,16 +52,23 @@ class TreeDecoder(json.JSONDecoder):
             raise ValueError(f"Unknown _raptor_type: {dct["_raptor_type"]}")
 
 
-@pytest.fixture
-def save_tree():
-    def inner(path: str, storage: MemoryStorage):
-        with open(path, "w") as f:
-            f.write(json.dumps(storage.to_dict(), cls=TreeEncoder))
+@pytest.fixture(scope="session")
+def build_tree(
+    cinderella_text,
+    memory_storage,
+):
 
-    return inner
+    bart_summarization_model = BartSummarizationModel()
+    sbert_embedder = SBertEmbeddingModel()
 
-
-@pytest.fixture
-def cinderella_tree():
-    with open("tests/cinderella.json", "r") as f:
-        return json.loads(f.read(), cls=TreeDecoder)
+    builder = ClusterTreeBuilder(
+        ClusterTreeBuilder.Config(
+            summarization_model=bart_summarization_model,
+            embedding_model=sbert_embedder,
+            storage=memory_storage,
+        )
+    )
+    chunks = cinderella_text.split(".")
+    builder.build_from_chunks(
+        chunks,
+    )

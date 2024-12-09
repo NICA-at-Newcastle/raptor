@@ -6,7 +6,7 @@ import dataclasses
 from typing import Literal, TypeVar, Dict, List, Optional, Set, Tuple, Generic
 from abc import abstractmethod, ABC
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
+import numpy as np
 from .embedding_models import IEmbeddingModel
 from .summarization_models import ISummarizationModel
 from .storages import IStorageSave
@@ -84,33 +84,19 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
         index: int,
         chunk: _CHUNK,
         layer: int,
-        children_indices: Optional[Set[int]] = None,
-        is_root: bool = False,
+        embedding: np.ndarray | None = None,
     ) -> Tuple[int, Node]:
-        """Creates a new node with the given index, text, and (optionally) children indices.
 
-        Args:
-            index (int): The index of the new node.
-            text (str): The text associated with the new node.
-            children_indices (Optional[Set[int]]): A set of indices representing the children of the new node.
-                If not provided, an empty set will be used.
+        if embedding is None:
+            embedding = self.config.embedding_model.create_embedding(chunk)
 
-        Returns:
-            Tuple[int, Node]: A tuple containing the index and the newly created node.
-        """
-        if children_indices is None:
-            children_indices = set()
+        node: Node = {
+            "chunk": chunk,
+            "index": index,
+            "layer": layer,
+            "embedding": embedding,
+        }
 
-        embedding = self.config.embedding_model.create_embedding(chunk)
-
-        node = self.config.storage.create_node(
-            chunk,
-            index,
-            layer,
-            embedding,
-            children_indices,
-            is_root,
-        )
         return (index, node)
 
     def summarize(self, context: list[_CHUNK]) -> _CHUNK:
@@ -171,7 +157,7 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
         """
         with ThreadPoolExecutor() as executor:
             future_nodes = {
-                executor.submit(self.create_node, index, text, 0): (index, text)
+                executor.submit(self.create_node, index, text, 0): (index, text, 0)
                 for index, text in enumerate(chunks)
             }
 
@@ -185,7 +171,7 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
     def build_from_chunks(
         self,
         chunks: list[_CHUNK],
-        use_multithreading: bool = True,
+        use_multithreading: bool = False,
     ) -> Tree:
         """Builds a tree using the pre-computed chunks."""
         logging.info("Creating Leaf Nodes")
@@ -200,13 +186,15 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
                 "layer_to_nodes": {},
             }
 
-        if use_multithreading:
-            leaf_nodes = self.multithreaded_create_leaf_nodes(chunks)
-        else:
-            leaf_nodes = {}
-            for index, text in enumerate(chunks):
-                _, node = self.create_node(index, text, 0)
-                leaf_nodes[index] = node
+        leaf_nodes: dict[int, Node] = {}
+        for index, chunk in enumerate(chunks):
+            _, node = self.create_node(index, chunk, 0)
+            leaf_nodes[index] = {
+                "index": index,
+                "chunk": chunk,
+                "layer": 0,
+                "embedding": node["embedding"],
+            }
 
         layer_to_nodes = {0: list(leaf_nodes.values())}
 
@@ -216,26 +204,41 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
 
         all_nodes = copy.deepcopy(leaf_nodes)
 
-        root_nodes = self.construct_tree(all_nodes, all_nodes, layer_to_nodes)
-
-        root_nodes_list = root_nodes.values()
-        summarized_text = self.summarize(
-            context=[node["chunk"] for node in root_nodes_list],
+        top_level_nodes, outliers = self.construct_tree(
+            all_nodes,
+            all_nodes,
+            layer_to_nodes,
+            use_multithreading=use_multithreading,
         )
-        next_node_index = max(root_nodes.keys()) + 1
-        _, new_root_node = self.create_node(
+
+        top_level_nodes_list = top_level_nodes.values()
+        summarized_text = self.summarize(
+            context=[node["chunk"] for node in top_level_nodes_list],
+        )
+        next_node_index = max(top_level_nodes.keys()) + 1
+        _, root_node = self.create_node(
             next_node_index,
             summarized_text,
             len(layer_to_nodes),
-            {node["index"] for node in root_nodes_list},
-            True,
         )
-        all_nodes.update({next_node_index: new_root_node})
-        layer_to_nodes[len(layer_to_nodes)] = [new_root_node]
+
+        self.config.storage.save_node(
+            root_node,
+            parent=None,
+        )
+
+        for node in [*top_level_nodes_list, *outliers]:
+            self.config.storage.save_node(
+                node,
+                parent=root_node["index"],
+            )
+
+        all_nodes.update({next_node_index: root_node})
+        layer_to_nodes[len(layer_to_nodes)] = [root_node]
 
         return {
             "all_nodes": all_nodes,
-            "root_nodes": root_nodes,
+            "root_nodes": top_level_nodes,
             "leaf_nodes": leaf_nodes,
             "num_layers": self.config.num_layers,
             "layer_to_nodes": layer_to_nodes,
@@ -248,7 +251,7 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
         all_tree_nodes: Dict[int, Node],
         layer_to_nodes: Dict[int, List[Node]],
         use_multithreading: bool = True,
-    ) -> Dict[int, Node]:
+    ) -> tuple[Dict[int, Node], list[Node]]:
         """
         Constructs the hierarchical tree structure layer by layer by iteratively summarizing groups
         of relevant nodes and updating the current_level_nodes and all_tree_nodes dictionaries at each step.

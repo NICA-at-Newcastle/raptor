@@ -40,8 +40,8 @@ class TreeRetriever(Generic[_CHUNK]):
         class Flatten:
             """Flatten()"""
 
-        class Tree(int):
-            """Tree(start_layer)"""
+        class Tree(tuple[int, bool]):
+            """Tree((start_layer, include_outliers))"""
 
     class StringQuery(str):
         """StringQuery(query)"""
@@ -143,7 +143,8 @@ class TreeRetriever(Generic[_CHUNK]):
     def _retreive_information_from_storage(
         self,
         query: np.ndarray,
-        indices: Optional[set[int]],
+        /,
+        parents: Optional[set[int]],
         layer: Optional[int],
     ) -> Iterable[Node]:
 
@@ -155,7 +156,7 @@ class TreeRetriever(Generic[_CHUNK]):
 
         found = self.storage.search(
             query,
-            indices=indices,
+            parents=parents,
             layer=layer,
             limit=limit,
         )
@@ -169,38 +170,46 @@ class TreeRetriever(Generic[_CHUNK]):
     def _retreive_information_from_child_nodes_recurse(
         self,
         query: np.ndarray,
-        parent_nodes: List[Node],
+        /,
+        parents: List[Node],
+        layer: int | None,  # Set to none to include outliers
         iteration_number: int,
     ) -> Iterable[Node]:
 
-        child_node_indices: set[int] = set().union(
-            *(node["children"] for node in parent_nodes)
-        )
+        parent_node_indices = {node["index"] for node in parents}
 
-        if iteration_number >= self.max_iterations or len(child_node_indices) == 0:
+        if iteration_number >= self.max_iterations:
             return []
 
         nodes_to_add = list(
             self._retreive_information_from_storage(
                 query,
-                child_node_indices,
-                None,
+                parents=parent_node_indices,
+                layer=layer,
             )
         )
+
+        if len(nodes_to_add) == 0 or layer == 0:
+            return nodes_to_add
+
+        next_layer = None if layer is None else layer - 1
 
         return itertools.chain(
             nodes_to_add,
             self._retreive_information_from_child_nodes_recurse(
                 query,
-                nodes_to_add,
-                iteration_number + 1,
+                parents=nodes_to_add,
+                layer=next_layer,
+                iteration_number=iteration_number + 1,
             ),
         )
 
     def _retrieve_information_tree_search(
         self,
-        query: str,
+        query: Query,
+        /,
         start_layer: int,
+        include_outliers: bool,
     ) -> Iterable[Node[_CHUNK]]:
         """
         Retrieves the most relevant information from the tree based on the query.
@@ -220,15 +229,17 @@ class TreeRetriever(Generic[_CHUNK]):
         selected_nodes = list(
             self._retreive_information_from_storage(
                 query_embedding,
-                None,
-                start_layer,
+                parents=None,
+                layer=start_layer,
             )
         )
 
+        next_layer = None if include_outliers else start_layer - 1
         child_selected_nodes = self._retreive_information_from_child_nodes_recurse(
             query_embedding,
-            selected_nodes,
-            0,
+            parents=selected_nodes,
+            layer=next_layer,
+            iteration_number=0,
         )
 
         selected_nodes.extend(child_selected_nodes)
@@ -262,15 +273,20 @@ class TreeRetriever(Generic[_CHUNK]):
         """
 
         match search_method:
-            case self.SearchMethod.Tree(start_layer):
+            case self.SearchMethod.Tree((start_layer, include_outliers)):
                 selected_nodes = list(
                     self._retrieve_information_tree_search(
-                        query,
-                        start_layer,
+                        self.StringQuery(query),
+                        start_layer=start_layer,
+                        include_outliers=include_outliers,
                     )
                 )
             case self.SearchMethod.Flatten():
                 logging.info("Using collapsed_tree")
-                selected_nodes = list(self.retrieve_information_collapse_tree(query))
+                selected_nodes = list(
+                    self.retrieve_information_collapse_tree(self.StringQuery(query))
+                )
+            case _:
+                raise ValueError("Invalid search_method")
 
         return selected_nodes

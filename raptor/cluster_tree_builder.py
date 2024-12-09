@@ -1,5 +1,4 @@
-from typing import override, Dict, List, TypeVar, Generic
-from abc import abstractmethod
+from typing import override, Dict, List, TypeVar
 import logging
 import dataclasses
 from concurrent.futures import ThreadPoolExecutor
@@ -9,6 +8,7 @@ from .tree_builder import TreeBuilder
 from .utils import (
     get_node_list,
 )
+from .clustering_algorithms.base import ClusteringAlgorithm
 from .clustering_algorithms.umap_gmm import UMAPGMMClusteringAlgorithm
 from .tree_structures import Node
 
@@ -17,25 +17,6 @@ logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
 _CHUNK = TypeVar("_CHUNK")
 _C = TypeVar("_C")
-
-
-class ClusteringAlgorithm(Generic[_CHUNK]):
-    """
-    Base clustering algorithm. Clusters the given nodes into a list of clusters.
-    """
-
-    @abstractmethod
-    def __call__(
-        self,
-        nodes: List[Node[_CHUNK]],
-    ) -> tuple[list[list[Node[_CHUNK]]], list[Node[_CHUNK]]]:
-        """
-        Returns
-        -------
-        tuple[list[list[Node[_CHUNK]]], list[Node[_CHUNK]]]
-            A tuple containing the clusters and the outliers.
-        """
-        raise NotImplementedError("Implement in subclass")
 
 
 class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
@@ -77,10 +58,11 @@ class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
         all_tree_nodes: Dict[int, Node],
         layer_to_nodes: Dict[int, List[Node]],
         use_multithreading: bool = False,
-    ) -> Dict[int, Node]:
+    ) -> tuple[Dict[int, Node], list[Node]]:
         logging.info("Using Cluster TreeBuilder")
 
         next_node_index = len(all_tree_nodes)
+        all_outliers = []
 
         def process_cluster(
             cluster: list[Node],
@@ -89,7 +71,6 @@ class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
             next_node_index: int,
             lock: Lock,
         ):
-
             summarized_text = self.summarize(
                 context=[node["chunk"] for node in cluster],
             )
@@ -98,8 +79,13 @@ class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
                 next_node_index,
                 summarized_text,
                 layer,
-                {node["index"] for node in cluster},
             )
+
+            for node in cluster:
+                self.config.storage.save_node(
+                    node,
+                    next_node_index,
+                )
 
             with lock:
                 new_level_nodes[next_node_index] = new_parent_node
@@ -109,11 +95,12 @@ class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
             new_level_nodes = {}
 
             logging.info("Constructing Layer %s", true_layer_number)
-
             node_list_current_layer = get_node_list(current_level_nodes)
 
             logging.info("Clustering %s nodes", len(node_list_current_layer))
             clusters, outliers = self.clustering_algorithm(node_list_current_layer)
+            logging.info("Got %s clusters", len(clusters))
+            all_outliers.extend(outliers)
 
             reduction_factor = (
                 0
@@ -161,4 +148,4 @@ class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
             current_level_nodes = new_level_nodes
             all_tree_nodes.update(new_level_nodes)
 
-        return current_level_nodes
+        return current_level_nodes, all_outliers

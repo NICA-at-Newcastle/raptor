@@ -12,7 +12,7 @@ class IStorageSearch(Protocol, Generic[_CHUNK_contra]):
     def search(
         self,
         search_vector: np.ndarray,
-        indices: Optional[set[int]] = None,
+        parents: Optional[set[int]] = None,
         layer: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> Iterable[tuple[Node[_CHUNK_contra], float]]: ...
@@ -21,12 +21,8 @@ class IStorageSearch(Protocol, Generic[_CHUNK_contra]):
 class IStorageSave(Protocol, Generic[_CHUNK_contra]):
     """Defines the methods required for a raptor tree build."""
 
-    def create_node(
+    def save_node(
         self,
-        chunk: _CHUNK_contra,
-        index: int,
-        layer: int,
-        embedding: np.ndarray,
-        children_indices: Optional[set[int]] = None,
-        is_root: bool = False,
-    ) -> Node[_CHUNK_contra]: ...
+        node: Node[_CHUNK_contra],
+        parent: Optional[int] = None,
+    ): ...

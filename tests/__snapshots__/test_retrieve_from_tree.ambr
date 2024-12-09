@@ -1,15 +1,9 @@
 # serializer version: 1
-# name: test_retreives_text
+# name: test_retreives_text_no_outliers
   list([
-    ' And as on that account she always looked dusty and dirty, they called her cinderella',
-    ' The father thought, can it be cinderella',
-    ' On this she turned her back on cinderella, and hurried away with her two proud daughters',
-    ' But he absolutely insisted on it, and cinderella had to be called',
-    ' And you, cinderella, said he, what will you have',
-    ' And as on that account she always looked dusty and dirty, they called her cinderella',
-    ' As on that account she always looked dusty and dirty, they called her cinderella .',
-    ' The father thought, can it be cinderella',
-    ' On this she turned her back on cinderella, and hurried away with her two proud daughters',
-    ' And you, cinderella, said he, what will you have?',
+  ])
+# ---
+# name: test_retreives_text_with_outliers
+  list([
   ])
 # ---
