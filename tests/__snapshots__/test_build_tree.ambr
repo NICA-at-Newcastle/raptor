@@ -1,0 +1,13 @@
+# serializer version: 1
+# name: test_builds_tree
+  dict({
+    'child_to_parent': dict({
+    }),
+    'index_to_node': dict({
+    }),
+    'layers': dict({
+    }),
+    'parent_to_children': dict({
+    }),
+  })
+# ---

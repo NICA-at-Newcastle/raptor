@@ -37,6 +37,10 @@ cd raptor
 pip install -r requirements.txt
 ```
 
+```
+brew install libmagic
+```
+
 ## Basic Usage
 
 To get started with RAPTOR, follow these steps:

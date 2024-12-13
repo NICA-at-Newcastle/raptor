@@ -1,115 +1,123 @@
+from typing import override, Dict, List, TypeVar
 import logging
-import pickle
+import dataclasses
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
-from typing import Dict, List, Set
 
-from .cluster_utils import ClusteringAlgorithm, RAPTOR_Clustering
-from .tree_builder import TreeBuilder, TreeBuilderConfig
-from .tree_structures import Node, Tree
-from .utils import (distances_from_embeddings, get_children, get_embeddings,
-                    get_node_list, get_text,
-                    indices_of_nearest_neighbors_from_distances, split_text)
+from .tree_builder import TreeBuilder
+from .utils import (
+    get_node_list,
+)
+from .clustering_algorithms.base import ClusteringAlgorithm
+from .clustering_algorithms.umap_gmm import UMAPGMMClusteringAlgorithm
+from .tree_structures import Node
 
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
 
-class ClusterTreeConfig(TreeBuilderConfig):
-    def __init__(
-        self,
-        reduction_dimension=10,
-        clustering_algorithm=RAPTOR_Clustering,  # Default to RAPTOR clustering
-        clustering_params={},  # Pass additional params as a dict
-        *args,
-        **kwargs,
-    ):
-        super().__init__(*args, **kwargs)
-        self.reduction_dimension = reduction_dimension
-        self.clustering_algorithm = clustering_algorithm
-        self.clustering_params = clustering_params
-
-    def log_config(self):
-        base_summary = super().log_config()
-        cluster_tree_summary = f"""
-        Reduction Dimension: {self.reduction_dimension}
-        Clustering Algorithm: {self.clustering_algorithm.__name__}
-        Clustering Parameters: {self.clustering_params}
-        """
-        return base_summary + cluster_tree_summary
+_CHUNK = TypeVar("_CHUNK")
+_C = TypeVar("_C")
 
 
-class ClusterTreeBuilder(TreeBuilder):
-    def __init__(self, config) -> None:
+class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
+    """Tree builder which uses clustering."""
+
+    @dataclasses.dataclass
+    class Config(TreeBuilder.Config[_C]):
+        """ClusterTreeBuilder config"""
+
+        clustering_algorithm: ClusteringAlgorithm = dataclasses.field(
+            default_factory=lambda: UMAPGMMClusteringAlgorithm(
+                UMAPGMMClusteringAlgorithm.Config()
+            )
+        )
+        target_reduction_factor: float = dataclasses.field(default=2)
+
+        def log_config(self):
+            base_summary = super().log_config()
+            cluster_tree_summary = f"""
+            Clustering Algorithm: {self.clustering_algorithm}
+            """
+            return base_summary + cluster_tree_summary
+
+    def __init__(self, config: Config[_CHUNK]) -> None:
         super().__init__(config)
 
-        if not isinstance(config, ClusterTreeConfig):
-            raise ValueError("config must be an instance of ClusterTreeConfig")
-        self.reduction_dimension = config.reduction_dimension
         self.clustering_algorithm = config.clustering_algorithm
-        self.clustering_params = config.clustering_params
+        self.target_reduction_factor = config.target_reduction_factor
 
         logging.info(
-            f"Successfully initialized ClusterTreeBuilder with Config {config.log_config()}"
+            "Successfully initialized ClusterTreeBuilder with Config %s",
+            config.log_config(),
         )
 
+    @override
     def construct_tree(
         self,
         current_level_nodes: Dict[int, Node],
         all_tree_nodes: Dict[int, Node],
         layer_to_nodes: Dict[int, List[Node]],
         use_multithreading: bool = False,
-    ) -> Dict[int, Node]:
+    ) -> tuple[Dict[int, Node], list[Node]]:
         logging.info("Using Cluster TreeBuilder")
 
         next_node_index = len(all_tree_nodes)
+        all_outliers = []
 
         def process_cluster(
-            cluster, new_level_nodes, next_node_index, summarization_length, lock
+            cluster: list[Node],
+            layer: int,
+            new_level_nodes: dict[int, Node],
+            next_node_index: int,
+            lock: Lock,
         ):
-            node_texts = get_text(cluster)
-
             summarized_text = self.summarize(
-                context=node_texts,
-                max_tokens=summarization_length,
+                context=[node["chunk"] for node in cluster],
             )
 
-            logging.info(
-                f"Node Texts Length: {len(self.tokenizer.encode(node_texts))}, Summarized Text Length: {len(self.tokenizer.encode(summarized_text))}"
+            _, new_parent_node = self.create_node(
+                next_node_index,
+                summarized_text,
+                layer,
             )
 
-            __, new_parent_node = self.create_node(
-                next_node_index, summarized_text, {node.index for node in cluster}
-            )
+            for node in cluster:
+                self.config.storage.save_node(
+                    node,
+                    next_node_index,
+                )
 
             with lock:
                 new_level_nodes[next_node_index] = new_parent_node
 
-        for layer in range(self.num_layers):
-
+        for layer in range(self.config.num_layers):
+            true_layer_number = layer + 1
             new_level_nodes = {}
 
-            logging.info(f"Constructing Layer {layer}")
-
+            logging.info("Constructing Layer %s", true_layer_number)
             node_list_current_layer = get_node_list(current_level_nodes)
 
-            if len(node_list_current_layer) <= self.reduction_dimension + 1:
-                self.num_layers = layer
+            logging.info("Clustering %s nodes", len(node_list_current_layer))
+            clusters, outliers = self.clustering_algorithm(node_list_current_layer)
+            logging.info("Got %s clusters", len(clusters))
+            all_outliers.extend(outliers)
+
+            reduction_factor = (
+                0
+                if len(clusters) == 0
+                else len(node_list_current_layer) / len(clusters)
+            )
+
+            if reduction_factor < self.target_reduction_factor:
+                self.num_layers = true_layer_number
                 logging.info(
-                    f"Stopping Layer construction: Cannot Create More Layers. Total Layers in tree: {layer}"
+                    "Stopping Layer construction: Reduction factor of %s reached. Total Layers in tree: %s",
+                    reduction_factor,
+                    true_layer_number,
                 )
                 break
 
-            clusters = self.clustering_algorithm.perform_clustering(
-                node_list_current_layer,
-                self.cluster_embedding_model,
-                reduction_dimension=self.reduction_dimension,
-                **self.clustering_params,
-            )
-
             lock = Lock()
-
-            summarization_length = self.summarization_length
-            logging.info(f"Summarization Length: {summarization_length}")
 
             if use_multithreading:
                 with ThreadPoolExecutor() as executor:
@@ -117,9 +125,9 @@ class ClusterTreeBuilder(TreeBuilder):
                         executor.submit(
                             process_cluster,
                             cluster,
+                            true_layer_number,
                             new_level_nodes,
                             next_node_index,
-                            summarization_length,
                             lock,
                         )
                         next_node_index += 1
@@ -129,23 +137,15 @@ class ClusterTreeBuilder(TreeBuilder):
                 for cluster in clusters:
                     process_cluster(
                         cluster,
+                        true_layer_number,
                         new_level_nodes,
                         next_node_index,
-                        summarization_length,
                         lock,
                     )
                     next_node_index += 1
 
-            layer_to_nodes[layer + 1] = list(new_level_nodes.values())
+            layer_to_nodes[true_layer_number] = list(new_level_nodes.values())
             current_level_nodes = new_level_nodes
             all_tree_nodes.update(new_level_nodes)
 
-            tree = Tree(
-                all_tree_nodes,
-                layer_to_nodes[layer + 1],
-                layer_to_nodes[0],
-                layer + 1,
-                layer_to_nodes,
-            )
-
-        return current_level_nodes
+        return current_level_nodes, all_outliers
