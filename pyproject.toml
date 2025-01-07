@@ -19,7 +19,7 @@ dependencies = [
     "faiss-cpu>=1.8.0.post1",
     "accelerate>=0.34.2",
 ]
-requires-python = "==3.12.*"
+requires-python = ">=3.11"
 readme = "README.md"
 license = {text = "MIT"}
 
@@ -40,9 +40,6 @@ test = [
     "pytest>=8.3.2",
     "pytest-mock>=3.14.0",
     "syrupy>=4.7.1",
-]
-dev = [
-    "-e file:///${PROJECT_ROOT}/#egg=raptor",
 ]
 
 [tool.setuptools.package-dir]
