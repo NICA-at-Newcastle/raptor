@@ -22,6 +22,9 @@ _CHUNK = TypeVar("_CHUNK")
 _C = TypeVar("_C")
 
 
+logger = logging.getLogger(__name__)
+
+
 class TreeRetriever(Generic[_CHUNK]):
     """Retrieves nodes from tree using raptor search."""
 
@@ -94,7 +97,7 @@ class TreeRetriever(Generic[_CHUNK]):
                 if x < 0:
                     raise ValueError("Threshold limit must specify a float > 0")
 
-        logging.info(
+        logger.info(
             f"Successfully initialized TreeRetriever with Config {config.log_config()}"
         )
 
@@ -234,6 +237,10 @@ class TreeRetriever(Generic[_CHUNK]):
             )
         )
 
+        if len(selected_nodes) == 0:
+            logger.warning("No nodes returned from storage at start of tree search. Is the storage empty?")
+            return []
+
         next_layer = None if include_outliers else start_layer - 1
         child_selected_nodes = self._retreive_information_from_child_nodes_recurse(
             query_embedding,
@@ -282,7 +289,7 @@ class TreeRetriever(Generic[_CHUNK]):
                     )
                 )
             case self.SearchMethod.Flatten():
-                logging.info("Using collapsed_tree")
+                logger.info("Using collapsed_tree")
                 selected_nodes = list(
                     self.retrieve_information_collapse_tree(self.StringQuery(query))
                 )
