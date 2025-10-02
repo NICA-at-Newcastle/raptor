@@ -33,8 +33,8 @@ class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
         )
         target_reduction_factor: float = dataclasses.field(default=2)
 
-        def log_config(self):
-            base_summary = super().log_config()
+        def __str__(self):
+            base_summary = super().__str__()
             cluster_tree_summary = f"""
             Clustering Algorithm: {self.clustering_algorithm}
             """
@@ -46,11 +46,6 @@ class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
         self.clustering_algorithm = config.clustering_algorithm
         self.target_reduction_factor = config.target_reduction_factor
 
-        logging.info(
-            "Successfully initialized ClusterTreeBuilder with Config %s",
-            config.log_config(),
-        )
-
     @override
     def construct_tree(
         self,
@@ -59,7 +54,6 @@ class ClusterTreeBuilder(TreeBuilder[_CHUNK]):
         layer_to_nodes: Dict[int, List[Node]],
         use_multithreading: bool = False,
     ) -> tuple[Dict[int, Node], list[Node]]:
-        logging.info("Using Cluster TreeBuilder")
 
         next_node_index = len(all_tree_nodes)
         all_outliers = []

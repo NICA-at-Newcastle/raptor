@@ -57,7 +57,7 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
             if self.top_k < 1:
                 raise ValueError("top_k must be at least 1")
 
-        def log_config(self) -> str:
+        def __str__(self) -> str:
             """Return a formatted string of the config."""
             return f"""
             TreeBuilderConfig:
@@ -74,10 +74,6 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
         """Initializes the tokenizer, maximum tokens, number of layers, top-k value, threshold, and selection mode."""
 
         self.config: TreeBuilder.Config[_CHUNK] = config
-
-        logging.info(
-            "Successfully initialized TreeBuilder with Config %s", config.log_config()
-        )
 
     def create_node(
         self,
@@ -174,7 +170,6 @@ class TreeBuilder(ABC, Generic[_CHUNK]):
         use_multithreading: bool = False,
     ) -> Tree:
         """Builds a tree using the pre-computed chunks."""
-        logging.info("Creating Leaf Nodes")
 
         if len(chunks) == 0:
             logging.warning("No chunks provided, raptor tree will be empty")

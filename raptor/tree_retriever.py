@@ -70,7 +70,7 @@ class TreeRetriever(Generic[_CHUNK]):
             if self.start_layer is not None and self.start_layer < 0:
                 raise ValueError("start_layer must be >= 0")
 
-        def log_config(self):
+        def __str__(self) -> str:
             """Returns string formatted config."""
             return f"""
             TreeRetriever.Config:
@@ -95,11 +95,6 @@ class TreeRetriever(Generic[_CHUNK]):
             case self.Limit.Threshold(x):
                 if x < 0:
                     raise ValueError("Threshold limit must specify a float > 0")
-
-        logger.info(
-            "Successfully initialized TreeRetriever with Config %s",
-            config.log_config()
-        )
 
     def _create_embedding(self, query: Query) -> np.ndarray:
         return self.embedding_model.create_embedding(query)
@@ -294,7 +289,6 @@ class TreeRetriever(Generic[_CHUNK]):
                     ).values()
                 )
             case self.SearchMethod.Flatten():
-                logger.info("Using collapsed_tree")
                 selected_nodes = list(
                     self.retrieve_information_collapse_tree(self.StringQuery(query))
                 )
