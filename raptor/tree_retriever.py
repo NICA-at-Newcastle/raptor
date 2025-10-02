@@ -1,5 +1,4 @@
 from __future__ import annotations
-import itertools
 import logging
 from typing import (
     List,
@@ -98,7 +97,8 @@ class TreeRetriever(Generic[_CHUNK]):
                     raise ValueError("Threshold limit must specify a float > 0")
 
         logger.info(
-            f"Successfully initialized TreeRetriever with Config {config.log_config()}"
+            "Successfully initialized TreeRetriever with Config %s",
+            config.log_config()
         )
 
     def _create_embedding(self, query: Query) -> np.ndarray:
@@ -177,35 +177,36 @@ class TreeRetriever(Generic[_CHUNK]):
         parents: List[Node],
         layer: int | None,  # Set to none to include outliers
         iteration_number: int,
-    ) -> Iterable[Node]:
+    ) -> dict[int, Node]:
 
         parent_node_indices = {node["index"] for node in parents}
 
         if iteration_number >= self.max_iterations:
-            return []
+            return {}
 
-        nodes_to_add = list(
-            self._retreive_information_from_storage(
+        nodes_to_add: dict[int, Node] = {
+            node["index"]: node
+            for node in self._retreive_information_from_storage(
                 query,
                 parents=parent_node_indices,
                 layer=layer,
             )
-        )
+        }
 
         if len(nodes_to_add) == 0 or layer == 0:
             return nodes_to_add
 
         next_layer = None if layer is None else layer - 1
 
-        return itertools.chain(
-            nodes_to_add,
-            self._retreive_information_from_child_nodes_recurse(
+        return {
+            **nodes_to_add,
+            **self._retreive_information_from_child_nodes_recurse(
                 query,
-                parents=nodes_to_add,
+                parents=list(nodes_to_add.values()),
                 layer=next_layer,
                 iteration_number=iteration_number + 1,
             ),
-        )
+        }
 
     def _retrieve_information_tree_search(
         self,
@@ -213,7 +214,7 @@ class TreeRetriever(Generic[_CHUNK]):
         /,
         start_layer: int,
         include_outliers: bool,
-    ) -> Iterable[Node[_CHUNK]]:
+    ) -> dict[int, Node[_CHUNK]]:
         """
         Retrieves the most relevant information from the tree based on the query.
         Recursively iterates to query embeddings on child nodes.
@@ -229,27 +230,31 @@ class TreeRetriever(Generic[_CHUNK]):
 
         query_embedding = self._create_embedding(query)
 
-        selected_nodes = list(
-            self._retreive_information_from_storage(
+        selected_nodes: dict[int, Node] = {
+            node["index"]: node
+            for node in self._retreive_information_from_storage(
                 query_embedding,
                 parents=None,
                 layer=start_layer,
             )
-        )
+        }
 
         if len(selected_nodes) == 0:
             logger.warning("No nodes returned from storage at start of tree search. Is the storage empty?")
-            return []
+            return {}
 
         next_layer = None if include_outliers else start_layer - 1
         child_selected_nodes = self._retreive_information_from_child_nodes_recurse(
             query_embedding,
-            parents=selected_nodes,
+            parents=list(selected_nodes.values()),
             layer=next_layer,
             iteration_number=0,
         )
 
-        selected_nodes.extend(child_selected_nodes)
+        selected_nodes = {
+            **selected_nodes,
+            **child_selected_nodes
+        }
         del child_selected_nodes
 
         return selected_nodes
@@ -286,7 +291,7 @@ class TreeRetriever(Generic[_CHUNK]):
                         self.StringQuery(query),
                         start_layer=start_layer,
                         include_outliers=include_outliers,
-                    )
+                    ).values()
                 )
             case self.SearchMethod.Flatten():
                 logger.info("Using collapsed_tree")
